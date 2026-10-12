@@ -1,0 +1,20 @@
+spring:
+  data:
+    redis:
+      database: 1
+  servlet:
+    multipart:
+      max-file-size: 500MB
+      max-request-size: 500MB
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+server:
+  port: 8084
+
+video:
+  upload:
+    dir: ./uploads/videos

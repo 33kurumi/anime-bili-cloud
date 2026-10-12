@@ -1,0 +1,30 @@
+spring:
+  data:
+    redis:
+      database: 4
+
+mybatis-plus:
+  global-config:
+    db-config:
+      id-type: auto
+  configuration:
+    map-underscore-to-camel-case: true
+
+# ── 大模型配置（OpenAI 兼容接口：DeepSeek / 通义千问 等）──
+# 没有 key 时服务仍可启动（返回占位回复），填上 key 即用真模型。
+abc:
+  ai:
+    provider: deepseek                 # deepseek / qwen（仅作标识）
+    base-url: https://api.deepseek.com # DeepSeek: https://api.deepseek.com  | 千问: https://dashscope.aliyuncs.com/compatible-mode
+    api-key: ${AI_API_KEY:}            # 环境变量 AI_API_KEY，或直接填
+    model: deepseek-chat               # DeepSeek: deepseek-chat  | 千问: qwen-plus
+    timeout-ms: 60000
+
+server:
+  port: 8089
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+  tomcat:
+    uri-encoding: UTF-8

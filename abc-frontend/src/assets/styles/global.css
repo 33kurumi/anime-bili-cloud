@@ -1,0 +1,34 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background-color: #f4f5f7;
+  color: #333;
+}
+
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+/* Bilibili-style color scheme */
+:root {
+  --primary: #fb7299;
+  --primary-hover: #fc8bab;
+  --primary-dark: #e5678c;
+  --text-primary: #222;
+  --text-secondary: #9499a0;
+  --bg-white: #ffffff;
+  --bg-gray: #f6f7f8;
+  --border: #e3e5e7;
+}
+
+/* DPlayer overrides */
+.dplayer {
+  border-radius: 8px;
+  overflow: hidden;
+}

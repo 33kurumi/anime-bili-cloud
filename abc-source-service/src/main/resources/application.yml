@@ -1,0 +1,27 @@
+spring:
+  data:
+    redis:
+      database: 3
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    serialization:
+      write-dates-as-timestamps: false
+
+mybatis-plus:
+  global-config:
+    db-config:
+      id-type: auto
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+abc:
+  browser:
+    channel: chrome
+    headless: true
+    timeout-ms: 15000
+
+server:
+  port: 8088
+  tomcat:
+    uri-encoding: UTF-8

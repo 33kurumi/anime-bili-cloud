@@ -1,0 +1,10 @@
+桌宠动画素材来源
+================
+文件夹：abc-frontend/public/pet/*.gif
+
+来源项目：ameath (https://github.com/sinlatansen/ameath)
+Copyright (c) 2026 sinlatansen
+许可：MIT License
+
+按 MIT 许可，此处保留原始版权声明。素材可自由使用/修改/分发。
+若在论文或公开部署中展示，建议注明素材来源。

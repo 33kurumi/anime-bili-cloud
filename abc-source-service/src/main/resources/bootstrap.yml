@@ -1,0 +1,19 @@
+spring:
+  application:
+    name: abc-source-service
+  cloud:
+    nacos:
+      config:
+        server-addr: 127.0.0.1:8848
+        username: nacos
+        password: nacos
+        file-extension: yaml
+        shared-configs:
+          - data-id: abc-common.yaml
+            refresh: true
+          - data-id: abc-datasource.yaml
+            refresh: true
+      discovery:
+        server-addr: 127.0.0.1:8848
+        username: nacos
+        password: nacos

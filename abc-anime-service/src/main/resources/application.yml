@@ -1,0 +1,34 @@
+spring:
+  data:
+    redis:
+      database: 1
+
+mybatis-plus:
+  global-config:
+    db-config:
+      id-type: auto
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+abc:
+  bangumi:
+    mirrors: https://api.bangumi.vip,https://bgmapi.anibt.net,https://api.bgmapi.com
+    # 评论接口在 next.* 镜像上（/p1/subjects/{id}/comments），普通 v0 镜像没有
+    comments-mirror: https://next.bangumi.vip
+    # 魔法兜底：开启后走本地 VPN/代理直连官方
+    # 用 next.bgm.tv（非 api.bgm.tv）——同样提供完整 v0+p1 API，且实测经本地代理可通
+    # （api.bgm.tv 常被 Clash 规则误走直连而失败）
+    official-url: https://next.bgm.tv
+    proxy:
+      host: 127.0.0.1   # 你的 VPN/代理客户端（Clash Verge 等）HTTP 端口
+      port: 7897
+
+server:
+  port: 8083
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+  tomcat:
+    uri-encoding: UTF-8

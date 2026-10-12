@@ -1,0 +1,57 @@
+spring:
+  application:
+    name: abc-gateway
+  cloud:
+    nacos:
+      discovery:
+        server-addr: 127.0.0.1:8848
+        username: nacos
+        password: nacos
+    gateway:
+      discovery:
+        locator:
+          enabled: false
+      routes:
+        # Auth Service
+        - id: abc-auth-service
+          uri: lb://abc-auth-service
+          predicates:
+            - Path=/api/auth/**
+        # User Service
+        - id: abc-user-service
+          uri: lb://abc-user-service
+          predicates:
+            - Path=/api/user/**
+        # Anime Service (datasource + search endpoints)
+        - id: abc-anime-service
+          uri: lb://abc-anime-service
+          predicates:
+            - Path=/api/anime/**,/api/datasource/**,/api/search/**
+        # Video Service
+        - id: abc-video-service
+          uri: lb://abc-video-service
+          predicates:
+            - Path=/api/video/**
+        # Danmaku Service
+        - id: abc-danmaku-service
+          uri: lb://abc-danmaku-service
+          predicates:
+            - Path=/api/danmaku/**
+        # Source Service (规则引擎/聚合搜索/播放解析/流代理)
+        - id: abc-source-service
+          uri: lb://abc-source-service
+          predicates:
+            - Path=/api/source/**
+        # Comment Service (comments + ratings)
+        - id: abc-comment-service
+          uri: lb://abc-comment-service
+          predicates:
+            - Path=/api/comment/**,/api/rating/**
+        # AI Service (桌宠对话/推荐)
+        - id: abc-ai-service
+          uri: lb://abc-ai-service
+          predicates:
+            - Path=/api/ai/**
+
+server:
+  port: 8080

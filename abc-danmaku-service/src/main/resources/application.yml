@@ -1,0 +1,19 @@
+spring:
+  data:
+    mongodb:
+      uri: mongodb://root:mongo123@127.0.0.1:27017/abc_danmaku?authSource=admin
+    redis:
+      database: 2
+
+rocketmq:
+  name-server: 127.0.0.1:9876
+  producer:
+    group: abc-danmaku-producer
+
+abc:
+  dandanplay:
+    app-id: ${DANDANPLAY_APP_ID:}
+    app-secret: ${DANDANPLAY_APP_SECRET:}
+
+server:
+  port: 8085

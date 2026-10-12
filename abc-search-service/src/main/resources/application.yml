@@ -1,0 +1,16 @@
+spring:
+  application:
+    name: abc-search-service
+  # 仅保留本服务差异项：redis database（host/port/password 来自 Nacos 共享配置）
+  data:
+    redis:
+      database: 1
+
+server:
+  port: 8087
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+  tomcat:
+    uri-encoding: UTF-8

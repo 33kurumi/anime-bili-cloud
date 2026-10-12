@@ -1,0 +1,8 @@
+# Shared config: Redis connection (all services using Redis)
+# Override per-service redis database in each application.yml if needed.
+spring:
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      password: redis123
