@@ -18,6 +18,11 @@ public interface LlmClient {
      */
     void streamChat(List<Map<String, String>> messages, Consumer<String> onToken);
 
+    /**
+     * 带指定 key 的流式对话（用户自带 key 时用；key 为空则走默认/兜底逻辑）。
+     */
+    void streamChat(List<Map<String, String>> messages, String userApiKey, Consumer<String> onToken);
+
     /** 非流式（一次返回全文）。 */
     String chat(List<Map<String, String>> messages);
 }

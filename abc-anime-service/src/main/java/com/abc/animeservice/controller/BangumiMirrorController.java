@@ -63,6 +63,14 @@ public class BangumiMirrorController {
                 "proxyConfigured", bangumiDataSource.proxyConfigured()));
     }
 
+    /** 运行时修改代理端口（各人本地 VPN 端口不同）。 */
+    @PostMapping("/proxy-port")
+    public R<Map<String, Object>> setProxyPort(@RequestParam int port) {
+        bangumiDataSource.setProxyPort(port);
+        return R.ok(Map.of("proxyPort", bangumiDataSource.getProxyPort(),
+                "proxyConfigured", bangumiDataSource.proxyConfigured()));
+    }
+
     private Map<String, Object> entry(String url, String type, long ms) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("url", url);

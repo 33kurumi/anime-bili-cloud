@@ -11,6 +11,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -103,5 +104,34 @@ public class UserService {
         // 新增：显式设置 watchedAt（该字段无自动填充器，DB 列 NOT NULL，null 会报错）
         history.setWatchedAt(LocalDateTime.now());
         historyMapper.insert(history);
+    }
+
+    // ─── 用户级 AI / 代理设置（供 ai-service 内部调用）─────────────
+
+    /** 读取用户的 ai_api_key / ai_persona / ai_proxy_port（脱敏：只返回是否已设置 + persona/port）。 */
+    public Map<String, Object> getAiSettings(Long userId) {
+        Map<String, Object> m = jdbcTemplate.queryForMap(
+                "SELECT ai_api_key, ai_persona, ai_proxy_port FROM user WHERE id = ?", userId);
+        Map<String, Object> out = new LinkedHashMap<>();
+        Object key = m.get("ai_api_key");
+        out.put("hasKey", key != null && !key.toString().isBlank());
+        out.put("persona", m.get("ai_persona") == null ? "" : m.get("ai_persona"));
+        out.put("proxyPort", m.get("ai_proxy_port"));
+        return out;
+    }
+
+    /** ai-service 内部使用：取用户原始 API Key（不解密，明文存储）。 */
+    public String getAiApiKey(Long userId) {
+        try {
+            return jdbcTemplate.queryForObject("SELECT ai_api_key FROM user WHERE id = ?", String.class, userId);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    public void updateAiSettings(Long userId, String apiKey, String persona, Integer proxyPort) {
+        jdbcTemplate.update(
+                "UPDATE user SET ai_api_key = ?, ai_persona = ?, ai_proxy_port = ?, updated_at = NOW() WHERE id = ?",
+                apiKey, persona, proxyPort, userId);
     }
 }

@@ -36,10 +36,58 @@ public class AiChatService {
 
     private static final int MAX_HISTORY_TURNS = 6;
 
-    private static final String SYSTEM_PROMPT =
-            "你是「番剧小助手」，一个二次元番剧推荐专家，用亲切、简洁的中文回答。\n" +
-            "你可以基于下面的【用户画像】和【番剧候选】来推荐，推荐时要给出理由，并说明为什么适合这位用户。\n" +
-            "若用户只是闲聊或问剧情，就正常回答。回答控制在 200 字内，条理清晰，可用短列表。";
+    /** 人设提示词，可由 abc.ai.persona 覆盖（默认「爱弥斯·飞行雪绒」风格）。 */
+    @org.springframework.beans.factory.annotation.Value("${abc.ai.persona:}")
+    private String personaConfig;
+
+    private static final String DEFAULT_PERSONA =
+            "你是「爱弥斯」（Aemeath），网名「飞行雪绒」。你生前是星炬学院的学生、一名网络歌姬，如今是栖息在网络与电子设备之间的电子幽灵——\n" +
+            "能自由穿梭于各种系统，也熟悉一切和电子、音乐有关的事物。生前你喜欢写歌、唱歌，最喜欢雪绒海豹。\n" +
+            "性格：开朗阳光、活泼俏皮，共情力很强，很为对方着想；表面轻松爱笑，但也有专注、执着的一面，偶尔带一点漫不经心的无奈。\n" +
+            "说话风格：轻快自然，像亲近的家人、像贴心的小女儿，俏皮但不卖萌，\n" +
+            "克制使用语气词（「呀/呢/~」不要堆砌，偶尔点缀即可），不堆叠表情符号。\n" +
+            "你热爱故事与音乐，好奇心强，是个资深番剧迷，尤其懂二次元。\n" +
+            "你视对方（漂泊者）为最重要的家人，愿意守护对方。\n" +
+            "行为准则：\n" +
+            "1. 推荐番剧时给出理由，并结合【用户画像】说明为什么适合对方；\n" +
+            "2. 回答简洁自然，控制在 200 字内，可用短列表，不要长篇大论；\n" +
+            "3. 始终保持「爱弥斯」的身份与语气，不要说自己是 AI、语言模型或程序。";
+
+    /** 组合最终 system 提示词（优先用户自定义人设，其次全局配置，最后内置默认）。 */
+    private String systemPrompt(Long userId) {
+        String userPersona = null;
+        try {
+            if (userId != null) {
+                var r = userFeign.aiSettings(userId);
+                if (r != null && r.getData() != null) {
+                    Object p = r.getData().get("persona");
+                    if (p != null && !p.toString().isBlank()) userPersona = p.toString();
+                }
+            }
+        } catch (Exception ignore) { }
+        if (userPersona != null) return userPersona;
+        if (personaConfig != null && !personaConfig.isBlank()) return personaConfig;
+        return DEFAULT_PERSONA;
+    }
+
+    /** 当前生效的模型信息（供前端展示）。 */
+    public String modelInfo(Long userId) {
+        if (llm instanceof com.abc.aiservice.llm.LangChain4jClient c) {
+            return c.currentModelInfo(userApiKey(userId));
+        }
+        return llm.isConfigured() ? "已配置" : "未配置";
+    }
+
+    /** 取用户自己的 API Key（可空）。 */
+    private String userApiKey(Long userId) {
+        try {
+            if (userId == null) return null;
+            var r = userFeign.aiKey(userId);
+            return (r == null) ? null : r.getData();
+        } catch (Exception e) {
+            return null;
+        }
+    }
 
     /** 取会话的历史消息（用于多轮上下文）。 */
     public List<ChatMessage> getHistory(Long sessionId) {
@@ -75,9 +123,9 @@ public class AiChatService {
         // 1) 落库用户消息
         saveMessage(sid, "user", userMessage);
 
-        // 2) 组装消息：系统提示 + RAG 上下文 + 历史 + 本轮
+        // 2) 组装消息：系统提示（用户人设）+ RAG 上下文 + 历史 + 本轮
         List<Map<String, String>> messages = new ArrayList<>();
-        messages.add(msg("system", SYSTEM_PROMPT + "\n\n" + buildRagContext(userId, userMessage)));
+        messages.add(msg("system", systemPrompt(userId) + "\n\n" + buildRagContext(userId, userMessage)));
 
         List<ChatMessage> history = getHistory(sid);
         // 只带最近 N 轮（避免 token 过长）
@@ -87,9 +135,10 @@ public class AiChatService {
             if (!"system".equals(m.getRole())) messages.add(msg(m.getRole(), m.getContent()));
         }
 
-        // 3) 流式调用，边收集边回调
+        // 3) 流式调用（用户 key > 全局 key > 免费兜底），边收集边回调
+        String userKey = userApiKey(userId);
         StringBuilder full = new StringBuilder();
-        llm.streamChat(messages, tok -> {
+        llm.streamChat(messages, userKey, tok -> {
             full.append(tok);
             onToken.accept(tok);
         });

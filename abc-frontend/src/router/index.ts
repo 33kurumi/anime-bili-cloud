@@ -1,4 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { useUserStore } from '@/stores/user'
+import { ElMessage } from 'element-plus'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -50,6 +52,15 @@ const router = createRouter({
 
 router.beforeEach((to, _from, next) => {
   document.title = (to.meta.title as string) || 'Anime Bilibili Cloud'
+  // 管理后台：仅管理员可进
+  if (to.meta.requireAdmin) {
+    const userStore = useUserStore()
+    if (!userStore.isLoggedIn() || !userStore.isAdmin()) {
+      ElMessage.warning('需要管理员权限')
+      next('/')
+      return
+    }
+  }
   next()
 })
 

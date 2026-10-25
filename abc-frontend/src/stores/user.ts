@@ -12,14 +12,17 @@ interface UserInfo {
 export const useUserStore = defineStore('user', () => {
   const token = ref(localStorage.getItem('accessToken') || '')
   const refreshToken = ref(localStorage.getItem('refreshToken') || '')
-  const user = ref<UserInfo>({
-    userId: null,
-    username: '',
-    role: 'USER',
-    avatar: ''
-  })
+  const user = ref<UserInfo>((() => {
+    // 从 localStorage 恢复用户信息（否则刷新后 role 会丢失）
+    try {
+      const s = localStorage.getItem('userInfo')
+      if (s) return JSON.parse(s)
+    } catch { /* ignore */ }
+    return { userId: null, username: '', role: 'USER', avatar: '' }
+  })())
 
   const isLoggedIn = () => !!token.value
+  const isAdmin = () => user.value.role === 'ADMIN'
 
   const login = async (username: string, password: string) => {
     const res = await api.post('/api/auth/login', { username, password })
@@ -34,6 +37,7 @@ export const useUserStore = defineStore('user', () => {
     }
     localStorage.setItem('accessToken', data.accessToken)
     localStorage.setItem('refreshToken', data.refreshToken)
+    localStorage.setItem('userInfo', JSON.stringify(user.value))
     return data
   }
 
@@ -46,11 +50,12 @@ export const useUserStore = defineStore('user', () => {
     user.value = { userId: null, username: '', role: 'USER', avatar: '' }
     localStorage.removeItem('accessToken')
     localStorage.removeItem('refreshToken')
+    localStorage.removeItem('userInfo')
   }
 
   const register = async (username: string, password: string, email: string) => {
     return api.post('/api/auth/register', { username, password, email })
   }
 
-  return { token, refreshToken, user, isLoggedIn, login, logout, register }
+  return { token, refreshToken, user, isLoggedIn, isAdmin, login, logout, register }
 })

@@ -19,6 +19,11 @@ abc:
     api-key: ${AI_API_KEY:}            # 环境变量 AI_API_KEY，或直接填
     model: deepseek-chat               # DeepSeek: deepseek-chat  | 千问: qwen-plus
     timeout-ms: 60000
+    # 桌宠人设（留空用代码内置的「爱弥斯·飞行雪绒」）；可自定义覆盖
+    persona: ""
+    # 免费兜底：用户无 API Key 时自动用（Pollinations，OpenAI 兼容，无需 Key）；留空禁用
+    free-fallback-base-url: https://text.pollinations.ai/openai
+    free-fallback-model: openai
 
 server:
   port: 8089

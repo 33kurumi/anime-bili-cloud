@@ -72,4 +72,29 @@ public class UserController {
         userService.recordHistory(history);
         return R.ok();
     }
+
+    // ─── 用户级 AI / 代理设置 ──────────────────────────────────
+
+    /** 查看 AI 设置（脱敏：key 只返回是否已设置）。 */
+    @GetMapping("/ai-settings")
+    public R<Map<String, Object>> getAiSettings(@RequestHeader("X-User-Id") Long userId) {
+        return R.ok(userService.getAiSettings(userId));
+    }
+
+    /** 更新 AI 设置（apiKey / persona / proxyPort）。 */
+    @PutMapping("/ai-settings")
+    public R<Void> updateAiSettings(@RequestHeader("X-User-Id") Long userId,
+                                    @RequestBody Map<String, Object> body) {
+        String apiKey = body.get("apiKey") == null ? null : String.valueOf(body.get("apiKey"));
+        String persona = body.get("persona") == null ? null : String.valueOf(body.get("persona"));
+        Integer proxyPort = body.get("proxyPort") == null ? null : Integer.valueOf(String.valueOf(body.get("proxyPort")));
+        userService.updateAiSettings(userId, apiKey, persona, proxyPort);
+        return R.ok();
+    }
+
+    /** 供 ai-service 内部调用：取用户原始 API Key。 */
+    @GetMapping("/ai-key")
+    public R<String> getAiKey(@RequestHeader("X-User-Id") Long userId) {
+        return R.ok(userService.getAiApiKey(userId));
+    }
 }

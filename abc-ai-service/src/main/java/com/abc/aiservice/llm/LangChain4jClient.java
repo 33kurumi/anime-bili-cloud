@@ -47,12 +47,27 @@ public class LangChain4jClient implements LlmClient {
     @Value("${abc.ai.timeout-ms:60000}")
     private int timeoutMs;
 
+    /** 免 key 免费兜底（用户未配置时用；Pollinations，OpenAI 兼容，无需 Key）。留空则禁用兜底。 */
+    @Value("${abc.ai.free-fallback-base-url:https://text.pollinations.ai/openai}")
+    private String freeFallbackBaseUrl;
+
+    @Value("${abc.ai.free-fallback-model:openai}")
+    private String freeFallbackModel;
+
     private volatile ChatModel chatModel;
     private volatile StreamingChatModel streamingModel;
+    private volatile ChatModel freeChatModel;            // 兜底（无 key）
+    private volatile StreamingChatModel freeStreamingModel;
 
+    /** 是否有用户/全局 key。 */
     @Override
     public boolean isConfigured() {
         return apiKey != null && !apiKey.isBlank();
+    }
+
+    /** 有无免费兜底。 */
+    private boolean hasFreeFallback() {
+        return freeFallbackBaseUrl != null && !freeFallbackBaseUrl.isBlank();
     }
 
     private ChatModel chatModel() {
@@ -85,19 +100,66 @@ public class LangChain4jClient implements LlmClient {
         return streamingModel;
     }
 
+    private ChatModel freeChatModel() {
+        if (freeChatModel == null) {
+            synchronized (this) {
+                if (freeChatModel == null) {
+                    freeChatModel = OpenAiChatModel.builder()
+                            .baseUrl(freeFallbackBaseUrl).apiKey("none").modelName(freeFallbackModel).build();
+                }
+            }
+        }
+        return freeChatModel;
+    }
+
+    private StreamingChatModel freeStreamingModel() {
+        if (freeStreamingModel == null) {
+            synchronized (this) {
+                if (freeStreamingModel == null) {
+                    freeStreamingModel = OpenAiStreamingChatModel.builder()
+                            .baseUrl(freeFallbackBaseUrl).apiKey("none").modelName(freeFallbackModel).build();
+                }
+            }
+        }
+        return freeStreamingModel;
+    }
+
+    /** 用指定 key 创建流式模型（用户自带 key，不入缓存）。 */
+    private StreamingChatModel streamingModel(String userApiKey) {
+        return OpenAiStreamingChatModel.builder()
+                .baseUrl(baseUrl).apiKey(userApiKey).modelName(model).build();
+    }
+
+    /** 当前生效的模型名 + 来源，用于前端展示。 */
+    public String currentModelInfo(String userApiKey) {
+        if (userApiKey != null && !userApiKey.isBlank()) return model + "（你的 Key）";
+        if (isConfigured()) return model + "（站点默认）";
+        if (hasFreeFallback()) return freeFallbackModel + "（免费兜底）";
+        return "未配置";
+    }
+
     @Override
     public void streamChat(List<Map<String, String>> messages, Consumer<String> onToken) {
-        if (!isConfigured()) {
+        streamChat(messages, null, onToken);
+    }
+
+    @Override
+    public void streamChat(List<Map<String, String>> messages, String userApiKey, Consumer<String> onToken) {
+        boolean hasUserKey = userApiKey != null && !userApiKey.isBlank();
+        if (!hasUserKey && !isConfigured() && !hasFreeFallback()) {
             String userMsg = lastUser(messages);
             String placeholder = "（未配置大模型 API Key，这是占位回复）你说的是：" + userMsg
-                    + "。配置 abc.ai.api-key 后即可接入真实大模型。";
+                    + "。在个人中心填入你的 API Key 即可接入真实大模型。";
             for (String seg : split(placeholder, 3)) onToken.accept(seg);
             return;
         }
+        // 用户 key > 全局 key > 免费兜底
+        StreamingChatModel model = hasUserKey ? streamingModel(userApiKey)
+                : (isConfigured() ? streamingModel() : freeStreamingModel());
         List<ChatMessage> lc = toMessages(messages);
         CountDownLatch latch = new CountDownLatch(1);
         try {
-            streamingModel().chat(lc, new StreamingChatResponseHandler() {
+            model.chat(lc, new StreamingChatResponseHandler() {
                 @Override
                 public void onPartialResponse(String partial) {
                     if (partial != null && !partial.isEmpty()) onToken.accept(partial);
@@ -126,9 +188,10 @@ public class LangChain4jClient implements LlmClient {
 
     @Override
     public String chat(List<Map<String, String>> messages) {
-        if (!isConfigured()) return "（未配置大模型 API Key）" + lastUser(messages);
+        if (!isConfigured() && !hasFreeFallback()) return "（未配置大模型 API Key）" + lastUser(messages);
         try {
-            ChatResponse resp = chatModel().chat(toMessages(messages));
+            ChatModel m = isConfigured() ? chatModel() : freeChatModel();
+            ChatResponse resp = m.chat(toMessages(messages));
             return resp.aiMessage().text();
         } catch (Exception e) {
             log.error("LangChain4j 调用失败", e);

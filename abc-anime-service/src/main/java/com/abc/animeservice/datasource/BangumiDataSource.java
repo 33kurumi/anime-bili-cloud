@@ -80,6 +80,11 @@ public class BangumiDataSource implements AnimeDataSource {
         this.proxyEnabled = on;
         log.info("魔法开关：{}（代理 {}:{}）", on ? "开" : "关", proxyHost, proxyPort);
     }
+    /** 运行时修改代理端口（各人本地 VPN 端口不同，允许在页面上改）。 */
+    public void setProxyPort(int port) {
+        this.proxyPort = port;
+        log.info("代理端口已改为 {}", port);
+    }
     public List<String> getMirrorList() { return new ArrayList<>(getMirrors()); }
     public String getProxyHost() { return proxyHost; }
     public int getProxyPort() { return proxyPort; }

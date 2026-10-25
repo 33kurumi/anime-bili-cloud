@@ -49,7 +49,6 @@
           <div class="magic-switch">
             <span>魔法开关（走本地代理直连官方）</span>
             <el-switch v-model="magicOn" @change="toggleMagic" />
-            <span class="hint" v-if="!mirrorStatus.proxyConfigured">未配置代理（application.yml 里设 abc.bangumi.proxy）</span>
           </div>
         </div>
         <div class="mirror-list" v-if="mirrorResults.length">
@@ -59,6 +58,31 @@
             <span class="m-type">{{ m.type }}</span>
             <span class="m-ms">{{ m.ok ? m.ms + 'ms' : '不可用' }}</span>
           </div>
+        </div>
+      </div>
+
+      <!-- AI 助手设置 -->
+      <div class="section">
+        <h3>🐾 桌宠 AI 设置</h3>
+        <div class="ai-form">
+          <div class="ai-row">
+            <label>当前模型</label>
+            <span class="ai-model">{{ aiForm.model || '-' }}</span>
+          </div>
+          <div class="ai-row">
+            <label>我的 API Key</label>
+            <el-input v-model="aiForm.apiKey" size="small" :placeholder="aiForm.hasKey ? '已设置（留空不改）' : '留空则用站点默认/免费兜底'" show-password />
+          </div>
+          <div class="ai-row">
+            <label>我的桌宠人设</label>
+            <el-input v-model="aiForm.persona" size="small" type="textarea" :rows="3" placeholder="留空用默认（爱弥斯·飞行雪绒）" />
+          </div>
+          <div class="ai-row">
+            <label>代理端口</label>
+            <el-input v-model.number="aiForm.proxyPort" size="small" style="width:140px" placeholder="如 7897" />
+            <el-button size="small" @click="saveProxyPort">保存端口</el-button>
+          </div>
+          <el-button type="primary" size="small" @click="saveAiSettings">保存 AI 设置</el-button>
         </div>
       </div>
     </div>
@@ -86,6 +110,38 @@ const mirrorResults = ref<any[]>([])
 const mirrorStatus = ref<any>({})
 const magicOn = ref(false)
 const testing = ref(false)
+
+// AI 设置
+const aiForm = ref<any>({ model: '', apiKey: '', persona: '', proxyPort: null, hasKey: false })
+const loadAiSettings = async () => {
+  try {
+    const [sRes, mRes] = await Promise.all([
+      api.get('/api/user/ai-settings'),
+      api.get('/api/ai/model')
+    ])
+    const s = sRes.data.data || {}
+    aiForm.value = { ...aiForm.value, persona: s.persona || '', proxyPort: s.proxyPort || null, hasKey: !!s.hasKey, model: mRes.data.data?.model || '' }
+  } catch { /* ignore */ }
+}
+const saveAiSettings = async () => {
+  try {
+    await api.put('/api/user/ai-settings', {
+      apiKey: aiForm.value.apiKey || null,
+      persona: aiForm.value.persona || null,
+      proxyPort: aiForm.value.proxyPort || null
+    })
+    aiForm.value.apiKey = ''
+    ElMessage.success('已保存')
+    loadAiSettings()
+  } catch { ElMessage.error('保存失败') }
+}
+const saveProxyPort = async () => {
+  if (!aiForm.value.proxyPort) { ElMessage.warning('请填端口号'); return }
+  try {
+    await api.post(`/api/datasource/mirror/proxy-port?port=${aiForm.value.proxyPort}`)
+    ElMessage.success('代理端口已更新为 ' + aiForm.value.proxyPort)
+  } catch { ElMessage.error('更新失败') }
+}
 
 const testMirrors = async () => {
   testing.value = true
@@ -128,6 +184,7 @@ const playHistory = (h: any) => {
 
 onMounted(async () => {
   loadMirrorStatus()   // 镜像/魔法状态（无需登录）
+  loadAiSettings()     // AI 设置
   if (!userStore.isLoggedIn()) return
   try {
     const [pRes, hRes] = await Promise.all([
@@ -180,6 +237,10 @@ onMounted(async () => {
 
 .mirror-controls { display: flex; align-items: center; gap: 20px; margin-bottom: 12px; flex-wrap: wrap; }
 .magic-switch { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.ai-form { background: #fff; border-radius: 8px; padding: 14px; }
+.ai-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.ai-row label { width: 90px; font-size: 14px; color: #555; flex-shrink: 0; }
+.ai-model { font-size: 13px; color: var(--primary); font-weight: 600; }
 .magic-switch .hint { font-size: 12px; color: #e6a23c; }
 .mirror-list { background: white; border-radius: 8px; padding: 8px 12px; }
 .mirror-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 13px; border-bottom: 1px solid var(--border); }

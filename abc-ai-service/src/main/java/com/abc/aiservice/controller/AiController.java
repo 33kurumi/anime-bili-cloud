@@ -37,6 +37,12 @@ public class AiController {
         return R.ok(aiChatService.getHistory(sessionId));
     }
 
+    /** 当前生效的大模型（供桌宠/个人中心展示）。 */
+    @GetMapping("/model")
+    public R<java.util.Map<String, Object>> model(@RequestHeader(value = "X-User-Id", required = false) Long userId) {
+        return R.ok(java.util.Map.of("model", aiChatService.modelInfo(userId)));
+    }
+
     /**
      * 流式对话（SSE）。前端用 EventSource 或 fetch 流读取。
      * GET /api/ai/chat/stream?message=xxx&sessionId=1
