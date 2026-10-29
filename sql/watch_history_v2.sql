@@ -1,3 +1,6 @@
+-- 说明：本脚本属于 abc_anime 库的增量 DDL，必须连接到对应数据库执行。
+USE abc_anime;
+
 -- 观看历史扩展：支持远程番剧的统一标识（animeKey + episodeNum）
 ALTER TABLE watch_history
   ADD COLUMN anime_key   VARCHAR(64)  DEFAULT NULL COMMENT '统一番剧标识 bgm:123/123' AFTER episode_id,

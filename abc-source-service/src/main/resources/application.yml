@@ -21,6 +21,16 @@ abc:
     headless: true
     timeout-ms: 15000
 
+# 流代理安全：HmacSHA256 签名 + 时间窗
+source:
+  proxy:
+    # 生产环境请用环境变量覆盖（SOURCE_PROXY_SECRET），默认值仅用于本地开发
+    secret: ${SOURCE_PROXY_SECRET:abc-source-proxy-2025}
+    # 直链签名有效期（秒）；HLS 子资源另有 1h 窗口
+    window-seconds: 300
+    # 本地联调/压测可关掉验签；线上必须为 true
+    enforce-sign: true
+
 server:
   port: 8088
   tomcat:

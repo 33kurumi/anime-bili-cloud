@@ -1,3 +1,6 @@
+-- 说明：本脚本属于 abc_anime 库的增量 DDL，必须连接到对应数据库执行。
+USE abc_anime;
+
 -- 用户级 AI / 代理设置（个人中心可改）
 ALTER TABLE user
   ADD COLUMN ai_api_key   VARCHAR(200)  DEFAULT NULL COMMENT '用户自己的大模型 API Key（可空）',

@@ -2,9 +2,16 @@ package com.abc.animeservice.controller;
 
 import ch.qos.logback.classic.Logger;
 import com.abc.animeservice.entity.Anime;
+import com.abc.animeservice.entity.AnimeTag;
 import com.abc.animeservice.entity.Episode;
 import com.abc.animeservice.entity.Tag;
 import com.abc.animeservice.mapper.AnimeMapper;
+import com.abc.animeservice.mapper.AnimeTagMapper;
+import com.abc.animeservice.mapper.EpisodeMapper;
+import com.abc.animeservice.mapper.TagMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import com.abc.animeservice.service.AnimeService;
 import com.abc.animeservice.datasource.BangumiDataSource;
 import com.abc.animeservice.datasource.Css1DataSource;
@@ -17,6 +24,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @RestController
@@ -28,6 +37,11 @@ public class AnimeController {
     private final AnimeMapper animeMapper;
     private final BangumiDataSource bangumiDataSource;
     private final Css1DataSource css1DataSource;
+    private final EpisodeMapper episodeMapper;
+    private final AnimeTagMapper animeTagMapper;
+    private final TagMapper tagMapper;
+    private final StringRedisTemplate stringRedisTemplate;
+    private final ObjectMapper objectMapper;
 
     @GetMapping("/list")
     public R<Page<Anime>> list(
@@ -117,25 +131,62 @@ public class AnimeController {
         return R.fail(404, "番剧不存在");
     }
 
+    /**
+     * 分集列表。
+     *
+     * <p>原实现把「bgm:400602」里的数字当本地 anime.id 去查（400602 会被误当成 dbId），
+     * 且每次刷新都同步打 2 个远程接口（无限流/无缓存），详情页换集即触发。
+     * 现在：bgm 前缀先按 bangumi_id 找本地 anime.id → 查 episode 表；
+     * 命中不了再走 Redis 缓存（6h）→ Bangumi，成功后顺手落库 episode。</p>
+     */
     @GetMapping("/{id}/episodes")
     public R<List<Episode>> episodes(@PathVariable String id) {
         String bgmId = id;
-        // 循环移除所有 bgm: 前缀，兼容重复拼接的情况
         while (bgmId.startsWith("bgm:")) {
             bgmId = bgmId.substring(4);
         }
 
-        // 1. 先尝试按本地数字ID查询
-        try {
-            Long dbId = Long.parseLong(bgmId);
-            List<Episode> localEpisodes = animeService.getEpisodes(dbId);
-            if (localEpisodes != null && !localEpisodes.isEmpty()) {
-                return R.ok(localEpisodes);
+        Anime local = null;
+        // 1. bgm: 前缀：按 bangumi_id 反查本地 id（不再把 bgmId 当 dbId）
+        if (id.startsWith("bgm:")) {
+            local = animeMapper.selectOne(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Anime>()
+                    .eq(Anime::getBangumiId, bgmId).last("LIMIT 1"));
+            if (local != null) {
+                List<Episode> localEpisodes = animeService.getEpisodes(local.getId());
+                if (localEpisodes != null && !localEpisodes.isEmpty()) {
+                    return R.ok(localEpisodes);
+                }
             }
-            // 本地查不到，继续走远程查询
-        } catch (NumberFormatException ignored) {}
+        } else {
+            // 2. 纯数字：直接按本地 anime.id 查
+            try {
+                Long dbId = Long.parseLong(bgmId);
+                local = animeMapper.selectById(dbId);
+                List<Episode> localEpisodes = animeService.getEpisodes(dbId);
+                if (localEpisodes != null && !localEpisodes.isEmpty()) {
+                    return R.ok(localEpisodes);
+                }
+            } catch (NumberFormatException ignored) {
+            }
+        }
 
-        // 2. 远程 Bangumi 查询剧集
+        if (!bgmId.matches("\\d+")) {
+            return R.ok(new ArrayList<>());
+        }
+
+        String cacheKey = "anime:episodes:" + bgmId;
+        // 3. Redis 缓存（6 小时）——避免每次进详情页都打 Bangumi
+        try {
+            String cached = stringRedisTemplate.opsForValue().get(cacheKey);
+            if (cached != null && !cached.isBlank()) {
+                return R.ok(objectMapper.readValue(cached, new TypeReference<List<Episode>>() {
+                }));
+            }
+        } catch (Exception e) {
+            log.warn("读取分集缓存失败，回源 Bangumi: {}", e.getMessage());
+        }
+
+        // 4. 远程 Bangumi
         List<Episode> list = new ArrayList<>();
         if (bangumiDataSource.isAvailable()) {
             try {
@@ -145,13 +196,35 @@ public class AnimeController {
                 if (eps != null) {
                     for (Map<String, Object> e : eps) {
                         Episode ep = new Episode();
-                        ep.setEpisodeNum((Integer) e.getOrDefault("episodeNum", 0));
-                        ep.setTitle((String) e.getOrDefault("title", "第" + e.get("episodeNum") + "集"));
-                        ep.setDuration((Long) e.getOrDefault("duration", 0L));
+                        ep.setEpisodeNum(e.get("episodeNum") == null ? 0 : ((Number) e.get("episodeNum")).intValue());
+                        ep.setTitle(e.get("title") == null ? "第" + ep.getEpisodeNum() + "集" : String.valueOf(e.get("title")));
+                        ep.setDuration(e.get("duration") == null ? 0L : ((Number) e.get("duration")).longValue());
                         list.add(ep);
                     }
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                log.warn("Bangumi 分集获取失败: {}", e.getMessage());
+            }
+        }
+
+        if (!list.isEmpty()) {
+            // 5. 写缓存（失败不影响返回）
+            try {
+                stringRedisTemplate.opsForValue().set(cacheKey, objectMapper.writeValueAsString(list), 6, TimeUnit.HOURS);
+            } catch (Exception e) {
+                log.warn("写分集缓存失败: {}", e.getMessage());
+            }
+            // 6. 本地有该番剧则落库 episode，后续走纯 DB 查询
+            if (local != null) {
+                try {
+                    for (Episode ep : list) {
+                        ep.setAnimeId(local.getId());
+                        episodeMapper.insert(ep);
+                    }
+                } catch (Exception e) {
+                    log.warn("分集落库失败（可忽略，下次仍走缓存）: {}", e.getMessage());
+                }
+            }
         }
         return R.ok(list);
     }
@@ -235,6 +308,28 @@ public class AnimeController {
         return R.ok();
     }
 
+    /** 读取番剧标签名（anime_tag -> tag），失败降级为空列表，不阻塞详情接口。 */
+    private List<String> loadTags(Long animeId) {
+        try {
+            List<AnimeTag> relations = animeTagMapper.selectList(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AnimeTag>()
+                            .eq(AnimeTag::getAnimeId, animeId));
+            if (relations.isEmpty()) {
+                return List.of();
+            }
+            List<Long> tagIds = relations.stream().map(AnimeTag::getTagId).filter(java.util.Objects::nonNull)
+                    .collect(Collectors.toList());
+            if (tagIds.isEmpty()) {
+                return List.of();
+            }
+            return tagMapper.selectBatchIds(tagIds).stream().map(Tag::getName)
+                    .filter(java.util.Objects::nonNull).collect(Collectors.toList());
+        } catch (Exception e) {
+            log.warn("读取番剧标签失败 animeId={}: {}", animeId, e.getMessage());
+            return List.of();
+        }
+    }
+
     private Map<String, Object> animeToMap(Anime a) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("id", String.valueOf(a.getId()));
@@ -249,6 +344,11 @@ public class AnimeController {
         result.put("ratingAvg", a.getRatingAvg());
         result.put("viewCount", a.getViewCount());
         result.put("studio", a.getStudio());
+        // 统一字段：前端详情页/卡片/收藏都按这套字段渲染（原先缺 bangumiId 导致收藏键错乱）
+        result.put("bangumiId", a.getBangumiId());
+        result.put("totalEpisodes", a.getEpisodesCount());
+        result.put("rating", a.getRatingAvg());
+        result.put("tags", loadTags(a.getId()));
         if (a.getTitle() != null && !a.getTitle().isBlank()) {
             List<Map<String, Object>> sources = new ArrayList<>();
             try {

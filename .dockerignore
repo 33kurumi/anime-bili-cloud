@@ -1,0 +1,21 @@
+# ============================================================
+# 构建上下文瘦身：12 个镜像都以"项目根"作为上下文（Java 镜像需要根 pom + abc-common），
+# 这里把不需要进镜像的内容排除，避免每次 build 都往守护进程传几百 MB。
+# ============================================================
+**/target/
+**/node_modules/
+abc-frontend/dist/
+abc-frontend/.vite/
+.git/
+.gitignore
+.idea/
+.vscode/
+.claude/
+*.log
+logs/
+uploads/
+jmeter/
+docs/
+*.md
+.env
+.env.*

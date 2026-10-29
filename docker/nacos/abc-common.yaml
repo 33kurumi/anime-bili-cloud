@@ -1,0 +1,9 @@
+# Shared config (Docker profile): Redis
+# 由 docker/init-nacos.sh 在容器启动时发布到 Nacos，dataId=abc-common.yaml
+# 与 sql/nacos/abc-common.yaml 的唯一差别：host 由 127.0.0.1 改成容器服务名 redis
+spring:
+  data:
+    redis:
+      host: redis
+      port: 6379
+      password: redis123

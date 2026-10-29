@@ -10,3 +10,8 @@ mybatis-plus:
 
 server:
   port: 8082
+
+# 服务间内部调用令牌：ai-service 通过 Feign 调 /api/user/ai-key/raw 时校验。
+# 生产环境用环境变量 ABC_INTERNAL_TOKEN 覆盖，避免明文写死在仓库。
+abc:
+  internal-token: ${ABC_INTERNAL_TOKEN:abc-internal-token-2024}

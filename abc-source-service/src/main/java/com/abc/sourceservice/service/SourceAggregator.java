@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
+import java.util.function.LongConsumer;
 
 /**
  * 多源聚合搜索（对齐 Animeko MediaFetchSession 的多源 combine + 去重 + 择优）。
@@ -36,6 +37,12 @@ public class SourceAggregator {
     private final TitleMatcher titleMatcher;
 
     private final ExecutorService pool = Executors.newFixedThreadPool(8);
+
+    /**
+     * 每个源最近一次搜索耗时（毫秒）。选源排序的第 3 级要读它，
+     * 用 ConcurrentHashMap 而不是再查 DB：这里是「运行时观测值」，不属于规则配置。
+     */
+    private final Map<Long, Long> lastResponseMs = new ConcurrentHashMap<>();
 
     /** 单个源的搜索结果（调试用）。 */
     public record SourceResult(String ruleName, Long ruleId, List<SearchItem> items, String error) { }
@@ -234,6 +241,14 @@ public class SourceAggregator {
      * 跨源搜索，返回全部候选（按标题相似度降序、去重），供调用方依次尝试解析。
      */
     public List<Candidate> findCandidates(String cleanTitle, int ep, int timeoutMs) {
+        return findCandidates(cleanTitle, ep, timeoutMs, null);
+    }
+
+    /**
+     * 同上，额外把「哪个源失败了」回调出去（选源编排用它记失败源黑名单 + 前端事件）。
+     * 失败回调只在异常路径触发；超时的源由调用方按 future 超时判定。
+     */
+    public List<Candidate> findCandidates(String cleanTitle, int ep, int timeoutMs, LongConsumer onRuleFailure) {
         List<SourceRule> rules = ruleService.listEnabled();
         List<Future<List<Candidate>>> futures = new ArrayList<>();
         RuleEngine engine = new RuleEngine();
@@ -241,6 +256,7 @@ public class SourceAggregator {
             RuleExecutionConfig cfg = ruleService.toConfig(rule);
             futures.add(pool.submit(() -> {
                 List<Candidate> out = new ArrayList<>();
+                long startedAt = System.currentTimeMillis();
                 try {
                     if (cfg.isMaccms()) {
                         for (MaccmsStrategy.MaccmsItem it : engine.searchMaccms(cfg, cleanTitle)) {
@@ -256,6 +272,12 @@ public class SourceAggregator {
                     ruleService.markHealth(rule.getId(), true);
                 } catch (Exception e) {
                     ruleService.markHealth(rule.getId(), false);
+                    log.info("源 {} 搜索失败: {}", rule.getName(), e.getMessage());
+                    if (onRuleFailure != null) {
+                        onRuleFailure.accept(rule.getId());
+                    }
+                } finally {
+                    lastResponseMs.put(rule.getId(), System.currentTimeMillis() - startedAt);
                 }
                 return out;
             }));
@@ -280,6 +302,12 @@ public class SourceAggregator {
             return Double.compare(b.score(), a.score());
         });
         return all;
+    }
+
+    /** 某个源最近一次搜索耗时（毫秒）；从未搜过返回 -1（排序时视为最慢）。 */
+    public long lastResponseTimeMs(long ruleId) {
+        Long v = lastResponseMs.get(ruleId);
+        return v == null ? -1L : v;
     }
 
     // ─── 指定源解析（用于"切换线路"）───────────────────────────

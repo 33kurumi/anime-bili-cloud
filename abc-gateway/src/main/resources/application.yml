@@ -1,6 +1,12 @@
 spring:
   application:
     name: abc-gateway
+  # 网关需要读 Redis 的 JWT 黑名单（logout 后 accessToken 立即失效）
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      database: 0
   cloud:
     nacos:
       discovery:
@@ -37,6 +43,11 @@ spring:
           uri: lb://abc-danmaku-service
           predicates:
             - Path=/api/danmaku/**
+        # 弹幕 WebSocket（lb:ws:// 让网关以 WebSocket 协议转发；令牌由 danmaku-service 握手时校验）
+        - id: abc-danmaku-ws
+          uri: lb:ws://abc-danmaku-service
+          predicates:
+            - Path=/ws/**
         # Source Service (规则引擎/聚合搜索/播放解析/流代理)
         - id: abc-source-service
           uri: lb://abc-source-service

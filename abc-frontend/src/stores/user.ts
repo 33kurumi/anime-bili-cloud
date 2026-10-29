@@ -1,61 +1,105 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
-import api from '@/api'
+import { computed, ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import api, { tokenStore } from '@/api'
 
-interface UserInfo {
+export interface UserInfo {
   userId: number | null
   username: string
   role: string
   avatar: string
 }
 
-export const useUserStore = defineStore('user', () => {
-  const token = ref(localStorage.getItem('accessToken') || '')
-  const refreshToken = ref(localStorage.getItem('refreshToken') || '')
-  const user = ref<UserInfo>((() => {
-    // 从 localStorage 恢复用户信息（否则刷新后 role 会丢失）
-    try {
-      const s = localStorage.getItem('userInfo')
-      if (s) return JSON.parse(s)
-    } catch { /* ignore */ }
-    return { userId: null, username: '', role: 'USER', avatar: '' }
-  })())
+const EMPTY_USER: UserInfo = { userId: null, username: '', role: 'USER', avatar: '' }
 
-  const isLoggedIn = () => !!token.value
-  const isAdmin = () => user.value.role === 'ADMIN'
-
-  const login = async (username: string, password: string) => {
-    const res = await api.post('/api/auth/login', { username, password })
-    const data = res.data.data
-    token.value = data.accessToken
-    refreshToken.value = data.refreshToken
-    user.value = {
-      userId: data.userId,
-      username: data.username,
-      role: data.role,
-      avatar: ''
+function readUserFromStorage(): UserInfo {
+  try {
+    const raw = localStorage.getItem('userInfo')
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<UserInfo>
+      return { ...EMPTY_USER, ...parsed }
     }
-    localStorage.setItem('accessToken', data.accessToken)
-    localStorage.setItem('refreshToken', data.refreshToken)
+  } catch {
+    /* 损坏的本地缓存直接忽略 */
+  }
+  return { ...EMPTY_USER }
+}
+
+export const useUserStore = defineStore('user', () => {
+  const token = ref(tokenStore.get())
+  const refreshToken = ref(tokenStore.getRefresh())
+  const user = ref<UserInfo>(readUserFromStorage())
+
+  /** 是否已登录：统一用函数形式，保持与旧页面 userStore.isLoggedIn() 的调用兼容 */
+  const isLoggedIn = (): boolean => !!token.value
+  const isAdmin = (): boolean => String(user.value.role).toUpperCase() === 'ADMIN'
+  const displayName = computed(() => user.value.username || '游客')
+  const userId = computed(() => user.value.userId)
+
+  /** 外部写入用户信息（登录后、资料编辑后） */
+  function setUser(info: Partial<UserInfo>): void {
+    user.value = { ...user.value, ...info }
     localStorage.setItem('userInfo', JSON.stringify(user.value))
-    return data
   }
 
-  const logout = async () => {
-    try {
-      await api.post('/api/auth/logout')
-    } catch { /* ignore */ }
+  /** 401 后清理本地登录态（由 request 层的 onUnauthorized 调用） */
+  function clearAuth(): void {
     token.value = ''
     refreshToken.value = ''
-    user.value = { userId: null, username: '', role: 'USER', avatar: '' }
-    localStorage.removeItem('accessToken')
-    localStorage.removeItem('refreshToken')
-    localStorage.removeItem('userInfo')
+    user.value = { ...EMPTY_USER }
+    tokenStore.clear()
   }
 
-  const register = async (username: string, password: string, email: string) => {
-    return api.post('/api/auth/register', { username, password, email })
+  /** 从 localStorage 重新水合（跨标签页同步 / 路由守卫兜底） */
+  function hydrate(): void {
+    token.value = tokenStore.get()
+    refreshToken.value = tokenStore.getRefresh()
+    user.value = readUserFromStorage()
   }
 
-  return { token, refreshToken, user, isLoggedIn, isAdmin, login, logout, register }
+  async function login(username: string, password: string): Promise<UserInfo> {
+    const res = await api.post('/api/auth/login', { username, password })
+    const data = res.data.data as {
+      accessToken: string
+      refreshToken: string
+      userId: number
+      username: string
+      role: string
+    }
+    token.value = data.accessToken
+    refreshToken.value = data.refreshToken
+    tokenStore.set(data.accessToken, data.refreshToken)
+    setUser({ userId: data.userId, username: data.username, role: data.role || 'USER' })
+    ElMessage.success('登录成功')
+    return user.value
+  }
+
+  async function logout(): Promise<void> {
+    try {
+      await api.post('/api/auth/logout', undefined, { silent: true } as never)
+    } catch {
+      /* 退出接口失败也要清本地态，保证用户能退出 */
+    }
+    clearAuth()
+  }
+
+  async function register(username: string, password: string, email: string): Promise<void> {
+    await api.post('/api/auth/register', { username, password, email })
+  }
+
+  return {
+    token,
+    refreshToken,
+    user,
+    userId,
+    displayName,
+    isLoggedIn,
+    isAdmin,
+    setUser,
+    clearAuth,
+    hydrate,
+    login,
+    logout,
+    register
+  }
 })

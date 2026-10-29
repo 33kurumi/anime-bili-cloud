@@ -51,6 +51,11 @@
             <groupId>cn.hutool</groupId>
             <artifactId>hutool-all</artifactId>
         </dependency>
+        <!-- 网关读取 Redis 中的 JWT 黑名单（登出令牌立即失效）；Redisson 版本由根 pom 统一管理 -->
+        <dependency>
+            <groupId>org.redisson</groupId>
+            <artifactId>redisson-spring-boot-starter</artifactId>
+        </dependency>
     </dependencies>
     <build>
         <plugins>

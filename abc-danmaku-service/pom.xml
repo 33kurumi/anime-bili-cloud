@@ -72,4 +72,67 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!--
+            单测为什么单独放一个 profile：
+            交付机房的 Maven 本地仓库是离线的，没有缓存 junit-jupiter 与 surefire 2.22.x，
+            默认构建若把测试源码放在 src/test/java，mvn test / package 会在 test-compile 阶段失败。
+            因此测试源码放在 src/unit-test/java，默认构建完全不编译它；
+            离线跑测试用本模块的 run-unit-tests.ps1（javac + junit-platform-launcher 直驱 Jupiter）。
+            联网机器上可以直接 mvn -Punit-tests test 走标准 surefire，用例完全一致。
+        -->
+        <profile>
+            <id>unit-tests</id>
+            <dependencies>
+                <dependency>
+                    <groupId>org.junit.jupiter</groupId>
+                    <artifactId>junit-jupiter</artifactId>
+                    <version>5.8.2</version>
+                    <scope>test</scope>
+                </dependency>
+                <dependency>
+                    <groupId>org.junit.platform</groupId>
+                    <artifactId>junit-platform-launcher</artifactId>
+                    <version>1.8.2</version>
+                    <scope>test</scope>
+                </dependency>
+            </dependencies>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>build-helper-maven-plugin</artifactId>
+                        <version>3.2.0</version>
+                        <executions>
+                            <execution>
+                                <id>add-unit-test-source</id>
+                                <phase>generate-test-sources</phase>
+                                <goals>
+                                    <goal>add-test-source</goal>
+                                </goals>
+                                <configuration>
+                                    <sources>
+                                        <source>${project.basedir}/src/unit-test/java</source>
+                                    </sources>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <version>2.22.2</version>
+                        <dependencies>
+                            <dependency>
+                                <groupId>org.apache.maven.surefire</groupId>
+                                <artifactId>surefire-junit-platform</artifactId>
+                                <version>2.22.2</version>
+                            </dependency>
+                        </dependencies>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

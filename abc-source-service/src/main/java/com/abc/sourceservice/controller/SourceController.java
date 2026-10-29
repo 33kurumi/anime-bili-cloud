@@ -4,6 +4,7 @@ import com.abc.common.result.R;
 import com.abc.sourceservice.entity.SourceRule;
 import com.abc.sourceservice.service.PlaybackService;
 import com.abc.sourceservice.service.RuleImporter;
+import com.abc.sourceservice.service.RuleProbeService;
 import com.abc.sourceservice.service.RuleTestService;
 import com.abc.sourceservice.service.SourceAggregator;
 import com.abc.sourceservice.service.SourceRuleService;
@@ -26,6 +27,7 @@ public class SourceController {
     private final PlaybackService playbackService;
     private final RuleImporter ruleImporter;
     private final RuleTestService ruleTestService;
+    private final RuleProbeService ruleProbeService;
 
     // ─── 规则 CRUD（ADMIN）─────────────────────────────────────
 
@@ -184,6 +186,25 @@ public class SourceController {
         SourceRule rule = ruleService.getById(id);
         if (rule == null) return R.fail(404, "规则不存在");
         return R.ok(ruleTestService.test(rule, keyword, withBrowser));
+    }
+
+    /**
+     * 统一规则探针：一次请求测任意一种模式的规则。
+     *
+     * <p>与 /test/rule/{id} 的区别：这个接口既测库内规则（传 ruleId），
+     * 也测「还没保存的规则配置」（直接传 mode + 各配置字段），
+     * 返回结构对齐前端规则编辑器：{matched, mode, items:[{title,link,episode}], costMs, errors}。
+     *
+     * <p>请求示例：
+     * <pre>
+     * {"ruleId": 12, "keyword": "火影忍者"}
+     * {"mode": "css", "baseUrl": "https://www.example.com",
+     *  "cssConfig": "{...Animeko searchConfig...}", "keyword": "火影忍者", "deep": true}
+     * </pre>
+     */
+    @PostMapping("/rule/test")
+    public R<Map<String, Object>> ruleTest(@RequestBody Map<String, Object> body) {
+        return R.ok(ruleProbeService.probe(body));
     }
 
     /** 批量测试全部规则，产出带状态的报告（不行的会被标注）。 */

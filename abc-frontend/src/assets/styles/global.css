@@ -1,34 +1,231 @@
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+/**
+ * 全局样式：青空次元式深色主题 + 响应式断点。
+ *
+ * 【设计意图】
+ * 1. 旧版只有 34 行 reset + 一批 B 站粉变量，页面各自写死颜色，导致"全站 Element Plus 默认样式"的观感。
+ *    这里建立一套设计 token（颜色/圆角/阴影/间距），页面只引用变量，后续换肤只改这里。
+ * 2. 深色是主基调（桌面端番剧应用的主流选择），品牌主色沿用哔哩哔哩粉，辅助色用青空蓝做渐变，呼应"青空次元"。
+ * 3. 断点：1200 / 1024 / 768 / 480。全站响应式，移动端可正常浏览与播放。
+ */
 
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  background-color: #f4f5f7;
-  color: #333;
-}
-
-a {
-  text-decoration: none;
-  color: inherit;
-}
-
-/* Bilibili-style color scheme */
+/* ============ 设计 token ============ */
 :root {
-  --primary: #fb7299;
-  --primary-hover: #fc8bab;
-  --primary-dark: #e5678c;
-  --text-primary: #222;
-  --text-secondary: #9499a0;
-  --bg-white: #ffffff;
-  --bg-gray: #f6f7f8;
-  --border: #e3e5e7;
+  --c-primary: #fb7299;
+  --c-primary-2: #ff9db6;
+  --c-primary-dark: #e35c84;
+  --c-accent: #4facfe;
+  --c-accent-2: #00d4ff;
+  --c-gradient: linear-gradient(120deg, #fb7299 0%, #b465da 55%, #4facfe 100%);
+  --c-gradient-soft: linear-gradient(120deg, rgba(251, 114, 153, .18), rgba(79, 172, 254, .16));
+
+  --c-bg: #0f1117;
+  --c-bg-soft: #141821;
+  --c-card: #191e29;
+  --c-card-hover: #1f2532;
+  --c-border: #262d3b;
+  --c-text: #e9ecf3;
+  --c-text-dim: #99a2b3;
+  --c-text-weak: #6b7688;
+
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 18px;
+  --shadow-card: 0 6px 20px rgba(0, 0, 0, .35);
+  --shadow-hover: 0 12px 32px rgba(0, 0, 0, .5);
+  --header-h: 64px;
+  --page-max: 1280px;
+
+  /* 兼容旧页面仍引用的变量名 */
+  --primary: var(--c-primary);
+  --primary-hover: var(--c-primary-2);
+  --primary-dark: var(--c-primary-dark);
+  --text-primary: var(--c-text);
+  --text-secondary: var(--c-text-dim);
+  --bg-white: var(--c-card);
+  --bg-gray: var(--c-bg-soft);
+  --border: var(--c-border);
 }
 
-/* DPlayer overrides */
-.dplayer {
-  border-radius: 8px;
+/* ============ reset ============ */
+* { box-sizing: border-box; }
+html, body, #app { height: 100%; }
+body {
+  margin: 0;
+  background: var(--c-bg);
+  color: var(--c-text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-decoration: none; }
+img { display: block; max-width: 100%; }
+h1, h2, h3, h4, p { margin: 0; }
+button { font-family: inherit; }
+
+/* 自定义滚动条（深色下默认滚动条太亮） */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--c-bg-soft); }
+::-webkit-scrollbar-thumb { background: #333c4d; border-radius: 6px; border: 2px solid var(--c-bg-soft); }
+::-webkit-scrollbar-thumb:hover { background: #465168; }
+
+/* ============ 布局 ============ */
+.page {
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: 24px 20px 48px;
+}
+.section {
+  margin-bottom: 36px;
+}
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: .3px;
+}
+/* 标题左侧的品牌色竖条 */
+.section-title::before {
+  content: '';
+  width: 4px;
+  height: 18px;
+  border-radius: 2px;
+  background: var(--c-gradient);
+}
+
+/* 通用卡片 */
+.abc-card {
+  background: var(--c-card);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+.abc-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(251, 114, 153, .45);
+  box-shadow: var(--shadow-hover);
+}
+
+/* 网格 */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(178px, 1fr));
+  gap: 18px;
+}
+
+/* 横向滑动列表（首页"继续观看"） */
+.h-scroll {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  scroll-snap-type: x proximity;
+}
+.h-scroll > * { scroll-snap-align: start; flex: 0 0 auto; }
+
+/* 文本工具类 */
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
+}
+.muted { color: var(--c-text-dim); }
+.weak { color: var(--c-text-weak); }
+.empty-block {
+  padding: 60px 20px;
+  text-align: center;
+  color: var(--c-text-dim);
+}
+
+/* 骨架屏（首屏加载用，比空白/转圈更少"闪烁感"） */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: #1b212c;
+  border-radius: var(--radius-sm);
+}
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .06), transparent);
+  animation: skeleton-shine 1.3s infinite;
+}
+@keyframes skeleton-shine {
+  100% { transform: translateX(100%); }
+}
+
+/* ============ Element Plus 深色适配 ============ */
+html.dark {
+  --el-color-primary: var(--c-primary);
+  --el-color-primary-light-3: #f78aa9;
+  --el-color-primary-dark-2: var(--c-primary-dark);
+  --el-bg-color: var(--c-card);
+  --el-bg-color-page: var(--c-bg);
+  --el-bg-color-overlay: #1c2230;
+  --el-fill-color-blank: var(--c-card);
+  --el-text-color-primary: var(--c-text);
+  --el-text-color-regular: #c6cddb;
+  --el-text-color-secondary: var(--c-text-dim);
+  --el-border-color: var(--c-border);
+  --el-border-color-light: var(--c-border);
+  --el-border-color-lighter: #20263400;
+  --el-mask-color: rgba(8, 10, 15, .72);
+}
+html.dark .el-card,
+html.dark .el-dialog,
+html.dark .el-message-box {
+  background: var(--c-card);
+  border-color: var(--c-border);
+}
+html.dark .el-table {
+  --el-table-bg-color: var(--c-card);
+  --el-table-tr-bg-color: var(--c-card);
+  --el-table-header-bg-color: #1e2431;
+  --el-table-row-hover-bg-color: #232a38;
+  --el-table-border-color: var(--c-border);
+  --el-table-text-color: var(--c-text);
+}
+html.dark .el-input__wrapper,
+html.dark .el-textarea__inner,
+html.dark .el-select__wrapper {
+  background-color: #131822;
+  box-shadow: 0 0 0 1px var(--c-border) inset;
+}
+html.dark .el-tabs__item { color: var(--c-text-dim); }
+html.dark .el-tabs__item.is-active { color: var(--c-primary); }
+
+/* ============ 响应式断点 ============ */
+@media (max-width: 1024px) {
+  .page { padding: 18px 14px 40px; }
+  .card-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+  .section { margin-bottom: 28px; }
+}
+
+@media (max-width: 768px) {
+  body { font-size: 13.5px; }
+  .page { padding: 14px 10px 32px; }
+  .card-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
+  .section-title { font-size: 16px; }
+  .section-title::before { height: 15px; }
+  /* 移动端去掉 hover 位移，避免"点了没反应"的粘滞感 */
+  .abc-card:hover { transform: none; }
+}
+
+@media (max-width: 480px) {
+  .card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

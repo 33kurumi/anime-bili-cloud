@@ -3,17 +3,70 @@ spring:
     mongodb:
       uri: mongodb://root:mongo123@127.0.0.1:27017/abc_danmaku?authSource=admin
     redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
       database: 2
+      timeout: 3000ms
 
 rocketmq:
   name-server: 127.0.0.1:9876
   producer:
     group: abc-danmaku-producer
+    send-message-timeout: 3000
 
 abc:
   dandanplay:
     app-id: ${DANDANPLAY_APP_ID:}
     app-secret: ${DANDANPLAY_APP_SECRET:}
+
+# ─────────────────────────────────────────────────────────────
+# 弹幕服务业务参数（DanmakuProperties 绑定，答辩时可现场改这里演示）
+# ─────────────────────────────────────────────────────────────
+danmaku:
+  # 写路径：WS 收到的弹幕先进 Redis List 缓冲，再由定时任务批量落库
+  buffer:
+    batch-size: 500            # 单房间单轮最多取 500 条
+    flush-interval-ms: 1000    # 每 1 秒 flush 一次（fixedDelay，跑完再计时）
+    warn-size: 5000            # 单房间缓冲超过 5000 条打告警（不丢数据）
+    zset-max-size: 50000       # 时间索引 ZSET 保留上限，超出裁剪最旧
+  # 频率限制：单用户 60 秒内最多 20 条
+  rate:
+    window-seconds: 60
+    max-per-window: 20
+  # 5 秒窗口内相同归一化文本合并为「原文 xN」，只广播合并结果
+  dedup:
+    window-seconds: 5
+    enabled: true
+  # 屏蔽正则：命中则落库标记 blocked=true 且不广播（便于事后审计）
+  shield:
+    patterns:
+      - "加群|代刷|刷粉|刷单|私聊"
+      - "https?://\\S+"
+  # 进程内 L1 缓存（自研 TTL+LRU）
+  local-cache:
+    max-size: 10000
+    ttl-seconds: 60
+  # RocketMQ 异步落库：本地/答辩环境没有 MQ 时置 false，自动走本地批量落库
+  mq:
+    enabled: ${DANMAKU_MQ_ENABLED:false}
+    topic: danmaku-topic
+    consumer-group: abc-danmaku-consumer
+    send-timeout-ms: 3000
+    payload-max-size: 500
+  # 时间窗查询
+  window:
+    max-limit: 2000
+    default-span-seconds: 60
+    scan-size: 1000
+  # 热度分桶（进度条弹幕密度）
+  heat:
+    bucket-seconds: 10
+    max-timeline-seconds: 14400
+  # 发送端校验
+  send:
+    max-text-length: 100
+    max-timeline-seconds: 14400
+    allow-guest-send: false
 
 server:
   port: 8085

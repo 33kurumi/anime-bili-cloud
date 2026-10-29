@@ -16,6 +16,14 @@ import java.time.LocalDateTime;
  *
  * <p>统一标识（P0-B）：{@code animeKey}（远程 "bgm:123" / 本地 "123"）+ {@code episodeNum}（集号）。
  * 不再依赖易混淆的 MySQL 自增 id，播放与弹幕共用同一套键。
+ *
+ * <p>task-6 新增字段（都带默认值，兼容历史数据）：
+ * <ul>
+ *   <li>{@code count}：5 秒去重窗口内同内容的出现次数（落库保留原文，广播时显示「原文 xN」）</li>
+ *   <li>{@code blocked}：是否命中屏蔽词/正则（true 只落库不广播，供后台审核，避免"删了就查无实据"）</li>
+ *   <li>{@code matchMethod}：DANDANPLAY 弹幕的匹配层级（BANGUMI_ID / TITLE_EXACT / TITLE_FUZZY），
+ *       用于答辩演示"三级匹配"命中率，也方便排查错误匹配</li>
+ * </ul>
  */
 @Data
 @Builder
@@ -63,4 +71,13 @@ public class Danmaku {
 
     /** When this danmaku was sent / pulled */
     private LocalDateTime sendTime;
+
+    /** 5 秒去重窗口内的出现次数；1 或 null 表示没有合并 */
+    private Integer count;
+
+    /** 是否命中屏蔽规则（true 仅落库，不广播） */
+    private Boolean blocked;
+
+    /** dandanplay 匹配方式：BANGUMI_ID / TITLE_EXACT / TITLE_FUZZY；USER 来源为 null */
+    private String matchMethod;
 }

@@ -11,6 +11,13 @@
     <artifactId>abc-source-service</artifactId>
     <name>abc-source-service</name>
     <description>Source service — pluggable scraping rule engine, multi-source aggregation, direct-link resolve</description>
+
+    <properties>
+        <!-- 单测用 JUnit5 版本：取本地仓库离线可用的 junit 5.8.2 + platform 1.8.2（1.9.x 的 launcher 未缓存） -->
+        <junit.version>5.8.2</junit.version>
+        <junit.platform.version>1.8.2</junit.platform.version>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>com.abc</groupId>
@@ -85,6 +92,7 @@
             <scope>provided</scope>
         </dependency>
     </dependencies>
+
     <build>
         <plugins>
             <plugin>
@@ -93,4 +101,76 @@
             </plugin>
         </plugins>
     </build>
+
+    <!--
+        单测为什么单独放一个 profile：
+        交付机房的 Maven 本地仓库是离线的（不能联网下载），没有缓存 junit-jupiter 与
+        surefire 2.22.x 的 jar。若把测试放在默认的 src/test/java，
+        mvn package -DskipTests 也会在 test-compile 阶段失败，整个构建就红了。
+        因此测试源码放在 src/unit-test/java，默认构建完全不编译它；
+        离线跑测试用本模块的 run-unit-tests.ps1（用 junit-platform-launcher 直驱 Jupiter，绕开 surefire），
+        联网机器上则可以直接 mvn -Punit-tests test 走标准 surefire。
+    -->
+    <profiles>
+        <!-- 联网机器：mvn -Punit-tests test 走标准 surefire 跑同一批用例 -->
+        <profile>
+            <id>unit-tests</id>
+            <dependencies>
+                <dependency>
+                    <groupId>org.junit.jupiter</groupId>
+                    <artifactId>junit-jupiter</artifactId>
+                    <version>${junit.version}</version>
+                    <scope>test</scope>
+                </dependency>
+                <dependency>
+                    <groupId>org.junit.platform</groupId>
+                    <artifactId>junit-platform-launcher</artifactId>
+                    <version>${junit.platform.version}</version>
+                    <scope>test</scope>
+                </dependency>
+            </dependencies>
+            <build>
+                <plugins>
+                    <!-- 把 src/unit-test/java 加进测试源码目录（Maven 的 profile build 里不能直接写 testSourceDirectory） -->
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>build-helper-maven-plugin</artifactId>
+                        <version>3.5.0</version>
+                        <executions>
+                            <execution>
+                                <id>add-unit-test-source</id>
+                                <phase>generate-test-sources</phase>
+                                <goals>
+                                    <goal>add-test-source</goal>
+                                </goals>
+                                <configuration>
+                                    <sources>
+                                        <source>${project.basedir}/src/unit-test/java</source>
+                                    </sources>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <!-- 默认 surefire 2.12.4 不支持 JUnit5；2.22.2 + launcher 1.8.2 与 jupiter 5.8.2 匹配 -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <version>2.22.2</version>
+                        <dependencies>
+                            <dependency>
+                                <groupId>org.apache.maven.surefire</groupId>
+                                <artifactId>surefire-junit-platform</artifactId>
+                                <version>2.22.2</version>
+                            </dependency>
+                            <dependency>
+                                <groupId>org.junit.platform</groupId>
+                                <artifactId>junit-platform-launcher</artifactId>
+                                <version>${junit.platform.version}</version>
+                            </dependency>
+                        </dependencies>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

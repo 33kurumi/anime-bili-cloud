@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  弹幕 WebSocket 压测脚本（JMeter 5.6.x + jmeter-websocket-samplers 插件）
+  被测接口：ws://<host>:8085/ws/danmaku/{animeKey}/{episodeNum}
+  消息体与前端 abc-frontend/src/views/play/PlayPage.vue:124-136 保持一致（Danmaku 实体的 camelCase 字段）
+  典型跑法：jmeter -n -t danmaku-test.jmx -l result.jtl -e -o report -Jthreads=500 -Jduration=120
+  并发档位建议：200 / 500 / 1000，每档 120s，ramp 10s（见 jmeter/README.md 对照实验设计）
+  说明：插件采样器属性名取自 Luminis-Arnhem/jmeter-websocket-samplers：
+        server / port / path / requestData / createNewConnection / payloadType / optional
+-->
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="弹幕 WebSocket 压测（200/500/1000 并发）" enabled="true">
+      <stringProp name="TestPlan.comments">压测弹幕房间广播链路：开连接 -&gt; 发弹幕 -&gt; 收广播 -&gt; 关连接。需要安装 jmeter-websocket-samplers 插件并把 jar 丢进 lib/ext。</stringProp>
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.tearDown_on_shutdown">true</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="用户定义的变量" enabled="true">
+        <collectionProp name="Arguments.arguments">
+          <elementProp name="WS_HOST" elementType="Argument">
+            <stringProp name="Argument.name">WS_HOST</stringProp>
+            <stringProp name="Argument.value">${__P(ws_host,127.0.0.1)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="WS_PORT" elementType="Argument">
+            <stringProp name="Argument.name">WS_PORT</stringProp>
+            <stringProp name="Argument.value">${__P(ws_port,8085)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="ANIME_KEY" elementType="Argument">
+            <stringProp name="Argument.name">ANIME_KEY</stringProp>
+            <stringProp name="Argument.value">${__P(anime_key,bgm:10380)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="EPISODE" elementType="Argument">
+            <stringProp name="Argument.name">EPISODE</stringProp>
+            <stringProp name="Argument.value">${__P(episode,1)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="PACING_MS" elementType="Argument">
+            <stringProp name="Argument.name">PACING_MS</stringProp>
+            <stringProp name="Argument.value">${__P(pacing_ms,1000)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+      <stringProp name="TestPlan.user_define_classpath"></stringProp>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="弹幕房间并发用户" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="循环控制器" enabled="true">
+          <boolProp name="LoopController.continue_forever">true</boolProp>
+          <stringProp name="LoopController.loops">-1</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">${__P(threads,200)}</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">${__P(ramp,10)}</stringProp>
+        <boolProp name="ThreadGroup.scheduler">true</boolProp>
+        <stringProp name="ThreadGroup.duration">${__P(duration,120)}</stringProp>
+        <stringProp name="ThreadGroup.delay">0</stringProp>
+        <boolProp name="ThreadGroup.same_user_on_next_iteration">true</boolProp>
+      </ThreadGroup>
+      <hashTree>
+        <OpenWebSocketSampler guiclass="eu.luminis.jmeter.wssampler.OpenWebSocketSamplerGui" testclass="eu.luminis.jmeter.wssampler.OpenWebSocketSampler" testname="01 连接弹幕房间" enabled="true">
+          <boolProp name="createNewConnection">true</boolProp>
+          <stringProp name="server">${WS_HOST}</stringProp>
+          <stringProp name="port">${WS_PORT}</stringProp>
+          <stringProp name="path">/ws/danmaku/${ANIME_KEY}/${EPISODE}</stringProp>
+        </OpenWebSocketSampler>
+        <hashTree/>
+        <ConstantTimer guiclass="ConstantTimerGui" testclass="ConstantTimer" testname="发送间隔（模拟真人打字节奏）" enabled="true">
+          <stringProp name="ConstantTimer.delay">${PACING_MS}</stringProp>
+        </ConstantTimer>
+        <hashTree/>
+        <SingleWriteWebSocketSampler guiclass="eu.luminis.jmeter.wssampler.SingleWriteWebSocketSamplerGui" testclass="eu.luminis.jmeter.wssampler.SingleWriteWebSocketSampler" testname="02 发送弹幕" enabled="true">
+          <boolProp name="createNewConnection">false</boolProp>
+          <boolProp name="loadDataFromFile">false</boolProp>
+          <stringProp name="requestData">{"userId":${__Random(1,5000)},"username":"jmeter-${__threadNum}","text":"压测弹幕 ${__RandomString(6,abcdefghijklmnopqrstuvwxyz)}","color":"#FFFFFF","position":0,"fontSize":18,"timestamp":${__Random(0,1400)}}</stringProp>
+          <stringProp name="payloadType">Text</stringProp>
+        </SingleWriteWebSocketSampler>
+        <hashTree/>
+        <SingleReadWebSocketSampler guiclass="eu.luminis.jmeter.wssampler.SingleReadWebSocketSamplerGui" testclass="eu.luminis.jmeter.wssampler.SingleReadWebSocketSampler" testname="03 接收广播" enabled="true">
+          <boolProp name="createNewConnection">false</boolProp>
+          <boolProp name="optional">true</boolProp>
+          <stringProp name="payloadType">Text</stringProp>
+        </SingleReadWebSocketSampler>
+        <hashTree/>
+      </hashTree>
+      <ResultCollector guiclass="StatVisualizer" testclass="ResultCollector" testname="聚合报告" enabled="true">
+        <boolProp name="ResultCollector.error_logging">false</boolProp>
+        <stringProp name="filename">${__P(report_dir,.)}/danmaku-aggregate.csv</stringProp>
+      </ResultCollector>
+      <hashTree/>
+      <ResultCollector guiclass="SummaryReport" testclass="ResultCollector" testname="汇总报告" enabled="true">
+        <boolProp name="ResultCollector.error_logging">false</boolProp>
+        <stringProp name="filename"></stringProp>
+      </ResultCollector>
+      <hashTree/>
+      <ResultCollector guiclass="SimpleDataWriter" testclass="ResultCollector" testname="原始结果写入 jtl" enabled="true">
+        <boolProp name="ResultCollector.error_logging">false</boolProp>
+        <stringProp name="filename">${__P(report_dir,.)}/danmaku-result.jtl</stringProp>
+      </ResultCollector>
+      <hashTree/>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

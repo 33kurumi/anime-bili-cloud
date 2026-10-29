@@ -1,254 +1,427 @@
 <template>
-  <div class="user-center">
-    <header class="user-header">
-      <a @click="goBack" class="back-link">← 返回</a>
-      <span class="title">个人中心</span>
-    </header>
+  <div class="uc-page page">
+    <!-- 资料卡 -->
+    <section class="profile abc-card">
+      <div class="avatar">
+        <img v-if="profile?.avatar" :src="profile.avatar" alt="头像" @error="onAvatarError" />
+        <span v-else>{{ initial }}</span>
+      </div>
+      <div class="info">
+        <h2 class="name">{{ profile?.username || userStore.displayName }}</h2>
+        <p class="weak bio">{{ profile?.bio || '这个人很懒，还没有写简介' }}</p>
+        <p v-if="profile?.email" class="weak email">{{ profile.email }}</p>
+        <div class="stats">
+          <span class="stat"><b>{{ followingCount }}</b> 关注</span>
+          <span class="stat"><b>{{ followerCount }}</b> 粉丝</span>
+          <span class="stat"><b>{{ history.length }}</b> 观看</span>
+          <span class="stat"><b>{{ favorites.length }}</b> 追番</span>
+        </div>
+      </div>
+      <div class="profile-actions">
+        <el-button :icon="Edit" @click="openEditProfile">编辑资料</el-button>
+        <el-button :icon="Star" @click="router.push('/favorites')">我的追番</el-button>
+        <el-button v-if="userStore.isAdmin()" :icon="Setting" @click="router.push('/admin')">管理后台</el-button>
+      </div>
+    </section>
 
-    <div class="user-content" v-if="profile">
-      <div class="user-card">
-        <div class="avatar-lg">{{ profile.username?.charAt(0) }}</div>
-        <h2>{{ profile.username }}</h2>
-        <p class="bio">{{ profile.bio || '这个人很懒，什么都没写...' }}</p>
-        <p class="email">{{ profile.email }}</p>
-        <div class="follow-stats">
-          <span>关注 {{ following.length }}</span>
-          <span>粉丝 {{ followers.length }}</span>
+    <el-tabs v-model="tab" class="uc-tabs">
+      <!-- 观看历史：支持续播 -->
+      <el-tab-pane label="观看历史" name="history">
+        <div v-if="!history.length" class="empty-block">还没有观看记录，去<router-link to="/">首页</router-link>逛逛吧</div>
+        <div v-else class="hist-list">
+          <div v-for="h in history" :key="String(h.id || h.animeKey + '-' + h.episodeNum)" class="hist-item" @click="playHistory(h)">
+            <img v-if="h.coverUrl" :src="h.coverUrl" class="hist-cover" loading="lazy" @error="onAvatarError" />
+            <div v-else class="hist-cover cover-ph"></div>
+            <div class="hist-info">
+              <p class="hist-title ellipsis">{{ h.title || h.animeKey }}</p>
+              <p class="weak">第 {{ h.episodeNum }} 话 · 看到 {{ fmt(Number(h.progress || 0)) }}</p>
+              <el-progress :percentage="progressPercent(h)" :stroke-width="4" :show-text="false" />
+            </div>
+            <span class="weak hist-time">{{ shortTime(h.watchedAt) }}</span>
+          </div>
         </div>
-      </div>
+      </el-tab-pane>
 
-      <!-- Watch History -->
-      <div class="section">
-        <h3>📺 观看历史</h3>
-        <el-empty v-if="!history.length" description="暂无观看记录" />
-        <div class="history-list" v-else>
-          <div class="history-item" v-for="h in history" :key="h.id" @click="playHistory(h)">
-            <div class="h-title">{{ h.title || h.animeKey }}</div>
-            <div class="h-sub">第{{ h.episodeNum }}集</div>
-            <span class="time">{{ formatTime(h.watchedAt) }}</span>
-          </div>
+      <!-- 我的收藏 / 追番 -->
+      <el-tab-pane label="我的追番" name="favorites">
+        <div v-if="!favorites.length" class="empty-block">还没有追番，去<router-link to="/bangumi">番剧库</router-link>收藏吧</div>
+        <div v-else class="fav-grid">
+          <AnimeCard v-for="f in favorites" :key="f.animeKey" :anime="toAnime(f)" />
         </div>
-      </div>
+      </el-tab-pane>
 
-      <!-- My Danmaku -->
-      <div class="section">
-        <h3>💬 我的弹幕</h3>
-        <el-empty v-if="!myDanmaku.length" description="还没有发过弹幕" />
-        <div class="dm-list" v-else>
-          <div class="dm-item" v-for="d in myDanmaku" :key="d.id">
-            <span class="dm-text">{{ d.text }}</span>
-            <span class="dm-meta">{{ d.animeKey }} · 第{{ d.episodeNum }}集 · {{ formatTime(d.sendTime) }}</span>
+      <!-- 我的弹幕 -->
+      <el-tab-pane label="我的弹幕" name="danmaku">
+        <div v-if="!myDanmaku.length" class="empty-block">还没有发过弹幕</div>
+        <div v-else class="dm-list">
+          <div v-for="d in myDanmaku" :key="String(d.id || d.text + d.timestamp)" class="dm-item">
+            <span class="dm-time weak">{{ fmt(Number(d.timestamp)) }}</span>
+            <span class="dm-text" :style="{ color: d.color || '#fff' }">{{ d.text }}</span>
+            <span class="weak">{{ d.animeKey || '' }} {{ d.episodeNum ? '第' + d.episodeNum + '话' : '' }}</span>
           </div>
         </div>
-      </div>
-      <!-- Bangumi 镜像 / 魔法兜底 -->
-      <div class="section">
-        <h3>🔧 Bangumi 镜像 / 魔法兜底</h3>
-        <div class="mirror-controls">
-          <el-button size="small" @click="testMirrors" :loading="testing">测试镜像可用性</el-button>
-          <div class="magic-switch">
-            <span>魔法开关（走本地代理直连官方）</span>
-            <el-switch v-model="magicOn" @change="toggleMagic" />
-          </div>
-        </div>
-        <div class="mirror-list" v-if="mirrorResults.length">
-          <div class="mirror-row" v-for="m in mirrorResults" :key="m.url">
-            <span class="dot" :class="m.ok ? 'green' : 'red'"></span>
-            <span class="m-url">{{ m.url }}</span>
-            <span class="m-type">{{ m.type }}</span>
-            <span class="m-ms">{{ m.ok ? m.ms + 'ms' : '不可用' }}</span>
-          </div>
-        </div>
-      </div>
+      </el-tab-pane>
 
-      <!-- AI 助手设置 -->
-      <div class="section">
-        <h3>🐾 桌宠 AI 设置</h3>
-        <div class="ai-form">
-          <div class="ai-row">
-            <label>当前模型</label>
-            <span class="ai-model">{{ aiForm.model || '-' }}</span>
+      <!-- 我的评分 -->
+      <el-tab-pane label="我的评分" name="ratings">
+        <div v-if="!myRatings.length" class="empty-block">还没有评分</div>
+        <div v-else class="rating-list">
+          <div v-for="r in myRatings" :key="String(r.id || r.animeId)" class="rating-item">
+            <span class="weak">番剧 {{ r.animeId }}</span>
+            <el-rate :model-value="Number(r.score) / 2" disabled allow-half />
+            <span class="score-num">{{ r.score }} 分</span>
           </div>
-          <div class="ai-row">
-            <label>我的 API Key</label>
-            <el-input v-model="aiForm.apiKey" size="small" :placeholder="aiForm.hasKey ? '已设置（留空不改）' : '留空则用站点默认/免费兜底'" show-password />
-          </div>
-          <div class="ai-row">
-            <label>我的桌宠人设</label>
-            <el-input v-model="aiForm.persona" size="small" type="textarea" :rows="3" placeholder="留空用默认（爱弥斯·飞行雪绒）" />
-          </div>
-          <div class="ai-row">
-            <label>代理端口</label>
-            <el-input v-model.number="aiForm.proxyPort" size="small" style="width:140px" placeholder="如 7897" />
-            <el-button size="small" @click="saveProxyPort">保存端口</el-button>
-          </div>
-          <el-button type="primary" size="small" @click="saveAiSettings">保存 AI 设置</el-button>
         </div>
-      </div>
-    </div>
-    <el-empty v-else description="请先登录" />
+      </el-tab-pane>
+
+      <!-- 设置：AI 助手 / Bangumi 镜像 -->
+      <el-tab-pane label="设置" name="settings">
+        <div class="set-block">
+          <h3 class="set-title">AI 助手设置</h3>
+          <el-form label-width="110px" style="max-width: 560px">
+            <el-form-item label="当前模型">
+              <el-tag>{{ aiModel || '未配置' }}</el-tag>
+            </el-form-item>
+            <el-form-item label="模型名称">
+              <el-input v-model="aiSettings.model" placeholder="如 deepseek-chat" />
+            </el-form-item>
+            <el-form-item label="接口地址">
+              <el-input v-model="aiSettings.apiUrl" placeholder="https://api.deepseek.com/v1" />
+            </el-form-item>
+            <el-form-item label="系统提示词">
+              <el-input v-model="aiSettings.systemPrompt" type="textarea" :rows="3" />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" :loading="aiSaving" @click="saveAiSettings">保存</el-button>
+            </el-form-item>
+          </el-form>
+        </div>
+
+        <div class="set-block">
+          <h3 class="set-title">Bangumi 镜像（运维能力）</h3>
+          <p class="weak">当官方 API 被墙时，可切换镜像代理获取番剧数据。</p>
+          <div class="mirror-row">
+            <el-tag :type="mirror.ok ? 'success' : 'info'">{{ mirror.ok ? '镜像可用' : '镜像未启用' }}</el-tag>
+            <span class="weak">{{ mirror.detail || '点击测试查看当前镜像状态' }}</span>
+            <el-button size="small" :loading="mirrorTesting" @click="testMirror">测试镜像</el-button>
+            <el-button size="small" :disabled="!mirror.publicUrl" @click="copyText(mirror.publicUrl)">复制镜像地址</el-button>
+          </div>
+          <pre v-if="mirror.port" class="mirror-json">{{ mirror.port }}</pre>
+        </div>
+      </el-tab-pane>
+    </el-tabs>
+
+    <!-- 编辑资料 -->
+    <el-dialog v-model="editVisible" title="编辑资料" width="480px">
+      <el-form :model="editForm" label-width="80px">
+        <el-form-item label="昵称"><el-input v-model="editForm.username" /></el-form-item>
+        <el-form-item label="邮箱"><el-input v-model="editForm.email" /></el-form-item>
+        <el-form-item label="头像URL"><el-input v-model="editForm.avatar" /></el-form-item>
+        <el-form-item label="简介"><el-input v-model="editForm.bio" type="textarea" :rows="3" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editVisible = false">取消</el-button>
+        <el-button type="primary" :loading="editSaving" @click="saveProfile">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+/**
+ * 个人中心。
+ * 旧版：只有数字形式的关注/粉丝、历史、我的弹幕，外加运维性质的镜像与 AI 设置，
+ * 且写死的 userId/username 满天飞；没有追番入口、没有编辑资料、没有我的评分。
+ * 新版：资料卡（可编辑）+ 历史续播 + 追番 + 我的弹幕 + 我的评分 + 设置。
+ * 后端：GET/PUT /api/user/profile、GET /api/user/following|followers、GET /api/user/history、
+ *       GET /api/user/favorite、GET /api/danmaku/my、GET /api/rating/user。
+ */
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import api from '@/api'
 import { ElMessage } from 'element-plus'
+import { Edit, Setting, Star } from '@element-plus/icons-vue'
+import { get, post, put } from '@/api'
 import { useUserStore } from '@/stores/user'
+import AnimeCard from '@/components/AnimeCard.vue'
+import type { AnimeItem, DanmakuItem, FavoriteItem, WatchHistoryItem } from '@/types'
+
+interface ProfileShape {
+  id?: number
+  username?: string
+  nickname?: string
+  email?: string
+  avatar?: string
+  bio?: string
+  role?: string
+}
+interface RatingRow { id?: number; animeId?: number | string; score?: number; createdAt?: string }
 
 const router = useRouter()
 const userStore = useUserStore()
-const profile = ref<any>(null)
-const following = ref<any[]>([])
-const followers = ref<any[]>([])
-const history = ref<any[]>([])
-const myDanmaku = ref<any[]>([])
 
-// Bangumi 镜像 / 魔法
-const mirrorResults = ref<any[]>([])
-const mirrorStatus = ref<any>({})
-const magicOn = ref(false)
-const testing = ref(false)
+const tab = ref('history')
+const profile = ref<ProfileShape | null>(null)
+const followingCount = ref(0)
+const followerCount = ref(0)
+const history = ref<WatchHistoryItem[]>([])
+const favorites = ref<FavoriteItem[]>([])
+const myDanmaku = ref<Array<DanmakuItem & { animeKey?: string; episodeNum?: number }>>([])
+const myRatings = ref<RatingRow[]>([])
+
+const editVisible = ref(false)
+const editSaving = ref(false)
+const editForm = reactive({ username: '', email: '', avatar: '', bio: '' })
 
 // AI 设置
-const aiForm = ref<any>({ model: '', apiKey: '', persona: '', proxyPort: null, hasKey: false })
-const loadAiSettings = async () => {
-  try {
-    const [sRes, mRes] = await Promise.all([
-      api.get('/api/user/ai-settings'),
-      api.get('/api/ai/model')
-    ])
-    const s = sRes.data.data || {}
-    aiForm.value = { ...aiForm.value, persona: s.persona || '', proxyPort: s.proxyPort || null, hasKey: !!s.hasKey, model: mRes.data.data?.model || '' }
-  } catch { /* ignore */ }
-}
-const saveAiSettings = async () => {
-  try {
-    await api.put('/api/user/ai-settings', {
-      apiKey: aiForm.value.apiKey || null,
-      persona: aiForm.value.persona || null,
-      proxyPort: aiForm.value.proxyPort || null
-    })
-    aiForm.value.apiKey = ''
-    ElMessage.success('已保存')
-    loadAiSettings()
-  } catch { ElMessage.error('保存失败') }
-}
-const saveProxyPort = async () => {
-  if (!aiForm.value.proxyPort) { ElMessage.warning('请填端口号'); return }
-  try {
-    await api.post(`/api/datasource/mirror/proxy-port?port=${aiForm.value.proxyPort}`)
-    ElMessage.success('代理端口已更新为 ' + aiForm.value.proxyPort)
-  } catch { ElMessage.error('更新失败') }
-}
+const aiModel = ref('')
+const aiSaving = ref(false)
+const aiSettings = reactive({ model: '', apiUrl: '', systemPrompt: '' })
 
-const testMirrors = async () => {
-  testing.value = true
-  try {
-    const res = await api.get('/api/datasource/mirror/test', { timeout: 60000 })
-    mirrorResults.value = res.data.data || []
-  } catch { mirrorResults.value = [] }
-  testing.value = false
-}
-const toggleMagic = async () => {
-  try {
-    await api.post(`/api/datasource/mirror/magic?enabled=${magicOn.value}`)
-    ElMessage.success(magicOn.value ? '魔法已开启（走本地代理）' : '魔法已关闭（走镜像）')
-  } catch { ElMessage.error('切换失败') }
-}
-const loadMirrorStatus = async () => {
-  try {
-    const res = await api.get('/api/datasource/mirror/status')
-    mirrorStatus.value = res.data.data || {}
-    magicOn.value = !!mirrorStatus.value.proxyEnabled
-  } catch { /* ignore */ }
-}
+// Bangumi 镜像
+const mirror = reactive({ ok: false, detail: '', publicUrl: '', port: '' })
+const mirrorTesting = ref(false)
 
-const formatTime = (t: any) => {
-  if (!t) return ''
-  // sendTime 可能是数组 [y,m,d,h,mi,s] 或 ISO 字符串
-  if (Array.isArray(t)) {
-    const d = new Date(t[0], t[1] - 1, t[2], t[3] || 0, t[4] || 0, t[5] || 0)
-    return d.toLocaleString('zh-CN')
-  }
-  return new Date(t).toLocaleString('zh-CN')
-}
-
-const goBack = () => { if (window.history.length > 1) router.back(); else router.push('/') }
-
-const playHistory = (h: any) => {
-  if (!h.animeKey || !h.episodeNum) return
-  router.push({ path: `/play/${encodeURIComponent(h.animeKey)}/${h.episodeNum}`, query: { title: h.title || '' } })
-}
+const initial = computed(() => {
+  const name = profile.value?.username || profile.value?.nickname || userStore.displayName || '?'
+  return String(name).charAt(0).toUpperCase()
+})
 
 onMounted(async () => {
-  loadMirrorStatus()   // 镜像/魔法状态（无需登录）
-  loadAiSettings()     // AI 设置
-  if (!userStore.isLoggedIn()) return
-  try {
-    const [pRes, hRes] = await Promise.all([
-      api.get('/api/user/profile'),
-      api.get('/api/user/history?limit=30')
-    ])
-    profile.value = pRes.data.data
-    history.value = hRes.data.data || []
-  } catch { /* ignore */ }
-  // 关注/粉丝（失败不影响）
-  try {
-    const [fRes, frRes] = await Promise.all([
-      api.get('/api/user/following'),
-      api.get('/api/user/followers')
-    ])
-    following.value = fRes.data.data || []
-    followers.value = frRes.data.data || []
-  } catch { /* ignore */ }
-  // 我的弹幕
-  try {
-    const dmRes = await api.get('/api/danmaku/my', { params: { username: userStore.user.username } })
-    myDanmaku.value = dmRes.data.data || []
-  } catch { /* ignore */ }
+  await Promise.all([loadProfile(), loadHistory(), loadFavorites(), loadMyDanmaku(), loadMyRatings(), loadAiSettings()])
+  loadMirror()
 })
+
+async function loadProfile(): Promise<void> {
+  try {
+    profile.value = await get<ProfileShape>('/api/user/profile', undefined, { silent: true })
+    syncEditForm()
+  } catch {
+    profile.value = null
+  }
+  // 关注/粉丝：接口返回列表，用长度计数（旧版只有硬编码数字）
+  try {
+    const [following, followers] = await Promise.all([
+      get<unknown[]>('/api/user/following', undefined, { silent: true }),
+      get<unknown[]>('/api/user/followers', undefined, { silent: true })
+    ])
+    followingCount.value = (following || []).length
+    followerCount.value = (followers || []).length
+  } catch {
+    followingCount.value = 0
+    followerCount.value = 0
+  }
+}
+
+function syncEditForm(): void {
+  editForm.username = profile.value?.username || profile.value?.nickname || ''
+  editForm.email = profile.value?.email || ''
+  editForm.avatar = profile.value?.avatar || ''
+  editForm.bio = profile.value?.bio || ''
+}
+
+async function loadHistory(): Promise<void> {
+  try {
+    history.value = await get<WatchHistoryItem[]>('/api/user/history', { limit: 30 }, { silent: true })
+  } catch {
+    history.value = []
+  }
+}
+
+async function loadFavorites(): Promise<void> {
+  try {
+    favorites.value = await get<FavoriteItem[]>('/api/user/favorite', undefined, { silent: true })
+  } catch {
+    favorites.value = []
+  }
+}
+
+async function loadMyDanmaku(): Promise<void> {
+  const username = profile.value?.username || userStore.displayName
+  if (!username) return
+  try {
+    myDanmaku.value = await get('/api/danmaku/my', { username }, { silent: true })
+  } catch {
+    myDanmaku.value = []
+  }
+}
+
+async function loadMyRatings(): Promise<void> {
+  try {
+    myRatings.value = await get<RatingRow[]>('/api/rating/user', undefined, { silent: true })
+  } catch {
+    myRatings.value = []
+  }
+}
+
+function openEditProfile(): void {
+  syncEditForm()
+  editVisible.value = true
+}
+
+async function saveProfile(): Promise<void> {
+  editSaving.value = true
+  try {
+    await put('/api/user/profile', { ...editForm })
+    ElMessage.success('资料已更新')
+    editVisible.value = false
+    await loadProfile()
+  } catch {
+    /* 拦截器已提示 */
+  }
+  editSaving.value = false
+}
+
+function onAvatarError(e: Event): void {
+  const img = e.target as HTMLImageElement
+  img.style.visibility = 'hidden'
+}
+
+function playHistory(h: WatchHistoryItem): void {
+  const key = String(h.animeKey || '')
+  const path = /^\d+$/.test(key) ? '/anime/' + key : '/anime/bgm:' + key.replace(/^bgm:/, '')
+  router.push(path)
+}
+
+function toAnime(f: FavoriteItem): AnimeItem {
+  return { title: f.title || f.animeKey, coverUrl: f.coverUrl, id: f.animeKey }
+}
+
+function progressPercent(h: WatchHistoryItem): number {
+  const total = Number(h.durationSec || 0)
+  const cur = Number(h.progress || 0)
+  if (!total) return 0
+  return Math.min(100, Math.round((cur / total) * 100))
+}
+
+function fmt(sec: number): string {
+  if (!sec || !Number.isFinite(sec)) return '00:00'
+  const m = Math.floor(sec / 60)
+  const s = Math.floor(sec % 60)
+  return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0')
+}
+
+function shortTime(value?: string): string {
+  if (!value) return ''
+  return String(value).replace('T', ' ').slice(5, 16)
+}
+
+async function loadAiSettings(): Promise<void> {
+  try {
+    const [settings, model] = await Promise.all([
+      get<{ model?: string; apiUrl?: string; systemPrompt?: string }>('/api/user/ai-settings', undefined, { silent: true }),
+      get<{ model?: string }>('/api/ai/model', undefined, { silent: true })
+    ])
+    aiSettings.model = settings?.model || ''
+    aiSettings.apiUrl = settings?.apiUrl || ''
+    aiSettings.systemPrompt = settings?.systemPrompt || ''
+    aiModel.value = model?.model || settings?.model || ''
+  } catch {
+    aiModel.value = ''
+  }
+}
+
+async function saveAiSettings(): Promise<void> {
+  aiSaving.value = true
+  try {
+    await put('/api/user/ai-settings', { ...aiSettings })
+    ElMessage.success('AI 设置已保存')
+    aiModel.value = aiSettings.model
+  } catch {
+    /* 拦截器已提示 */
+  }
+  aiSaving.value = false
+}
+
+async function loadMirror(): Promise<void> {
+  try {
+    const data = await get<Record<string, unknown>>('/api/datasource/mirror/status', undefined, { silent: true })
+    const obj = data || {}
+    mirror.ok = Boolean(obj.enabled ?? obj.ok ?? obj.mirrorEnabled)
+    mirror.detail = String(obj.message || obj.current || obj.activeMirror || '')
+    mirror.publicUrl = String(obj.publicUrl || obj.url || '')
+  } catch {
+    mirror.ok = false
+    mirror.detail = '镜像状态接口不可用'
+  }
+}
+
+async function testMirror(): Promise<void> {
+  mirrorTesting.value = true
+  try {
+    const data = await post<Record<string, unknown>>('/api/datasource/mirror/test', {}, { silent: true })
+    mirror.ok = Boolean(data?.ok ?? data?.success)
+    mirror.detail = String(data?.message || data?.detail || JSON.stringify(data))
+    ElMessage.success(mirror.ok ? '镜像可用' : '镜像不可用')
+  } catch {
+    ElMessage.error('镜像测试失败')
+  }
+  mirrorTesting.value = false
+}
+
+async function copyText(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('已复制')
+  } catch {
+    ElMessage.warning('复制失败，请手动选择')
+  }
+}
 </script>
 
 <style scoped>
-.user-header { background: white; padding: 14px 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); display: flex; align-items: center; gap: 14px; }
-.back-link { color: var(--primary); cursor: pointer; }
-.back-link:hover { text-decoration: underline; }
-.title { font-weight: 600; }
+.uc-page { padding-top: 20px; }
+.profile { display: flex; gap: 20px; align-items: center; padding: 22px; }
+.avatar {
+  width: 82px; height: 82px; border-radius: 50%; overflow: hidden; flex: none;
+  background: var(--c-gradient); color: #fff; font-size: 32px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.avatar img { width: 100%; height: 100%; object-fit: cover; }
+.info { flex: 1; min-width: 0; }
+.name { font-size: 20px; margin-bottom: 4px; }
+.bio { font-size: 13px; margin-bottom: 2px; }
+.email { font-size: 12px; }
+.stats { display: flex; gap: 18px; margin-top: 10px; font-size: 12.5px; color: var(--c-text-dim); }
+.stat b { color: var(--c-text); font-size: 15px; margin-right: 3px; }
+.profile-actions { display: flex; flex-direction: column; gap: 8px; }
+.uc-tabs { margin-top: 16px; }
 
-.user-content { max-width: 800px; margin: 0 auto; padding: 30px 20px; }
-.user-card { text-align: center; margin-bottom: 30px; }
-.avatar-lg { width: 80px; height: 80px; border-radius: 50%; background: var(--primary); color: white; font-size: 32px; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; }
-.bio { color: var(--text-secondary); }
-.email { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
-.follow-stats { margin-top: 12px; display: flex; justify-content: center; gap: 24px; font-size: 14px; color: var(--text-secondary); }
+.hist-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.hist-item {
+  display: flex; gap: 10px; padding: 10px; border-radius: var(--radius); cursor: pointer;
+  background: var(--c-card); border: 1px solid var(--c-border);
+}
+.hist-item:hover { border-color: var(--c-primary); }
+.hist-cover { width: 56px; height: 76px; object-fit: cover; border-radius: 6px; flex: none; }
+.cover-ph { background: var(--c-bg-soft); }
+.hist-info { flex: 1; min-width: 0; }
+.hist-title { font-size: 13.5px; font-weight: 600; margin-bottom: 4px; }
+.hist-info :deep(.el-progress__text) { display: none; }
+.hist-time { font-size: 11px; align-self: flex-start; }
 
-.section { margin-top: 30px; }
-.section h3 { margin-bottom: 12px; }
-.history-item { display: flex; align-items: center; gap: 12px; padding: 12px; background: white; border-radius: 8px; margin-bottom: 8px; cursor: pointer; transition: box-shadow .15s; }
-.history-item:hover { box-shadow: 0 4px 12px rgba(0,0,0,.1); }
-.h-title { font-weight: 500; }
-.h-sub { color: var(--text-secondary); font-size: 13px; margin-left: auto; }
-.time { font-size: 12px; color: var(--text-secondary); }
-.dm-item { padding: 10px 12px; background: white; border-radius: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; gap: 12px; }
-.dm-text { font-weight: 500; }
-.dm-meta { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+.fav-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); gap: 16px; }
+.dm-list { display: flex; flex-direction: column; gap: 8px; }
+.dm-item {
+  display: flex; gap: 12px; align-items: center; padding: 8px 12px;
+  background: var(--c-card); border-radius: 8px; font-size: 13px;
+}
+.dm-time { font-variant-numeric: tabular-nums; }
+.rating-list { display: flex; flex-direction: column; gap: 10px; }
+.rating-item {
+  display: flex; gap: 14px; align-items: center; padding: 10px 14px;
+  background: var(--c-card); border-radius: 8px; font-size: 13px;
+}
+.score-num { color: var(--c-primary); font-weight: 700; }
 
-.mirror-controls { display: flex; align-items: center; gap: 20px; margin-bottom: 12px; flex-wrap: wrap; }
-.magic-switch { display: flex; align-items: center; gap: 8px; font-size: 14px; }
-.ai-form { background: #fff; border-radius: 8px; padding: 14px; }
-.ai-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
-.ai-row label { width: 90px; font-size: 14px; color: #555; flex-shrink: 0; }
-.ai-model { font-size: 13px; color: var(--primary); font-weight: 600; }
-.magic-switch .hint { font-size: 12px; color: #e6a23c; }
-.mirror-list { background: white; border-radius: 8px; padding: 8px 12px; }
-.mirror-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 13px; border-bottom: 1px solid var(--border); }
-.mirror-row:last-child { border-bottom: none; }
-.mirror-row .m-url { flex: 1; }
-.mirror-row .m-type { color: var(--text-secondary); font-size: 12px; }
-.mirror-row .m-ms { color: var(--text-secondary); font-size: 12px; min-width: 60px; text-align: right; }
-.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
-.dot.green { background: #67c23a; }
-.dot.red { background: #f56c6c; }
+.set-block { margin-bottom: 26px; }
+.set-title { font-size: 15px; font-weight: 700; margin-bottom: 10px; }
+.mirror-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 10px; }
+.mirror-json { margin-top: 10px; font-size: 12px; background: var(--c-bg-soft); padding: 10px; border-radius: 8px; }
+
+@media (max-width: 768px) {
+  .profile { flex-wrap: wrap; gap: 12px; padding: 16px; }
+  .profile-actions { flex-direction: row; width: 100%; }
+  .stats { gap: 12px; flex-wrap: wrap; }
+  .hist-list { grid-template-columns: 1fr; }
+}
 </style>

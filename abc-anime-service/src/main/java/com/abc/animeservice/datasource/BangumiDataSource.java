@@ -432,7 +432,34 @@ public class BangumiDataSource implements AnimeDataSource {
         map.put("score", score);
         map.put("ratingAvg", score);
         map.put("episodesCount", obj.getInt("total_episodes", 0));
+        // 供前端标签展示 / 个性化 RAG 取数：bangumiId 与 tags 此前完全没有解析
+        map.put("bangumiId", String.valueOf(obj.getInt("id")));
+        map.put("totalEpisodes", obj.getInt("total_episodes", 0));
+        map.put("tags", extractTags(obj));
         return map;
+    }
+
+    /**
+     * 解析 Bangumi tags 数组（只取前 8 个名称）。
+     * 原实现完全忽略 tags，导致详情页/推荐链路无标签可用。
+     */
+    private List<String> extractTags(JSONObject subject) {
+        List<String> tags = new ArrayList<>();
+        JSONArray arr = subject.getJSONArray("tags");
+        if (arr == null) {
+            return tags;
+        }
+        for (int i = 0; i < arr.size() && tags.size() < 8; i++) {
+            JSONObject tag = arr.getJSONObject(i);
+            if (tag == null) {
+                continue;
+            }
+            String name = tag.getStr("name");
+            if (name != null && !name.isBlank()) {
+                tags.add(name);
+            }
+        }
+        return tags;
     }
 
     private Map<String, Object> subjectToDetailMap(JSONObject subject) {
@@ -452,6 +479,7 @@ public class BangumiDataSource implements AnimeDataSource {
         double score = ratingObj != null ? ratingObj.getDouble("score", 0.0) : 0.0;
         anime.put("ratingAvg", score);
         anime.put("studio", "");
+        anime.put("tags", extractTags(subject));
         return anime;
     }
 

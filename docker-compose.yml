@@ -1,10 +1,53 @@
-version: '3.8'
+# ============================================================
+# Anime Bilibili Cloud —— 一键部署（基础设施 + 10 个微服务 + 前端）
+# ------------------------------------------------------------
+# 目标：答辩现场一条命令跑起整套系统，评审不用装 JDK / Maven / Node / MySQL。
+# 设计要点（论文"系统部署"章节可直接引用）：
+#   1) 12 个镜像全部多阶段构建（maven -> jre、node -> nginx），运行镜像不含构建工具链；
+#   2) 启动顺序靠 healthcheck + depends_on(service_healthy / service_completed_successfully) 编排，
+#      不用 sleep 等待（sleep 是"第一次跑必崩、第二次才成功"的根源）；
+#   3) 配置中心不是摆设：nacos-config-init 一次性作业把 Docker 版共享配置发布进 Nacos，
+#      把 host 从 127.0.0.1 换成容器服务名，业务代码与 bootstrap.yml 一行都不用改；
+#   4) 前端 nginx 反代 /api、/ws、/uploads，与开发期 vite.config.ts 的 proxy 同构。
+# 依赖：Docker Engine >= 24 + Compose V2（Docker Desktop 4.x 自带）；建议内存 >= 8GB。
+# 快速开始：docker compose up -d --build    （详见 README-DOCKER.md）
+# ============================================================
+name: abc-anime
 
-# ═══════════════════════════════════════════════════════════════
-# Anime Bilibili Cloud — Infrastructure Stack
-# ═══════════════════════════════════════════════════════════════
+# ---------- 公共环境变量锚点（YAML merge key，避免 10 个服务重复写） ----------
+x-env-common: &env-common
+  TZ: Asia/Shanghai
+  # 每个 JVM 压到 512MB 上限：10 个服务 + ES/Nacos/MySQL 才能在 8GB 机器上共存
+  JAVA_OPTS: "-Xms256m -Xmx512m -XX:MaxMetaspaceSize=256m -XX:+UseG1GC -Duser.timezone=Asia/Shanghai -Dfile.encoding=UTF-8"
+  # bootstrap.yml 写的是 127.0.0.1:8848；Spring 环境变量优先级高于配置中心下发的配置源，
+  # 这里统一改成容器服务名，Java 侧不需要改动
+  SPRING_CLOUD_NACOS_DISCOVERY_SERVER_ADDR: nacos:8848
+  SPRING_CLOUD_NACOS_CONFIG_SERVER_ADDR: nacos:8848
+
+# MySQL：容器内 3306（宿主机映射的是 3307，别混用）
+x-env-mysql: &env-mysql
+  SPRING_DATASOURCE_URL: "jdbc:mysql://mysql:3306/abc_anime?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai"
+  SPRING_DATASOURCE_USERNAME: root
+  SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123}
+
+# Redis：各服务在 application.yml 里用了不同 db（0/1/2/3/4）做逻辑隔离，这里只覆盖连接信息
+x-env-redis: &env-redis
+  SPRING_DATA_REDIS_HOST: redis
+  SPRING_DATA_REDIS_PORT: "6379"
+  SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:-redis123}
+
+# 应用容器探活参数（eclipse-temurin 基础镜像没有 curl，用 bash 的 /dev/tcp 做 TCP 探活）
+x-hc: &hc
+  interval: 20s
+  timeout: 5s
+  retries: 30
+  start_period: 90s
 
 services:
+
+  # ══════════════════════════════════════════════════════════
+  #  一、基础设施
+  # ══════════════════════════════════════════════════════════
 
   # ── MySQL 8.0 ──────────────────────────────────────────────
   mysql:
@@ -12,7 +55,7 @@ services:
     container_name: abc-mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123}
       MYSQL_DATABASE: abc_anime
       MYSQL_USER: abc
       MYSQL_PASSWORD: abc123
@@ -21,8 +64,17 @@ services:
       - "3307:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql
-      - ./sql/abc_anime.sql:/docker-entrypoint-initdb.d/02-abc_anime.sql
+      # 初始化脚本按文件名顺序执行（docker-entrypoint-initdb.d 的约定）：
+      # 顺序不能乱：01 建库 -> 02 建表 -> 03/04 表结构增量 -> 05 用户表加列 -> 06/07 业务数据 -> 08/09 规则集
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./sql/abc_anime.sql:/docker-entrypoint-initdb.d/02-abc_anime.sql:ro
+      - ./sql/watch_history_v2.sql:/docker-entrypoint-initdb.d/03-watch_history_v2.sql:ro
+      - ./sql/ai_chat.sql:/docker-entrypoint-initdb.d/04-ai_chat.sql:ro
+      - ./sql/ai_user_settings.sql:/docker-entrypoint-initdb.d/05-ai_user_settings.sql:ro
+      - ./sql/source_rule.sql:/docker-entrypoint-initdb.d/06-source_rule.sql:ro
+      - ./sql/03_platform_extension.sql:/docker-entrypoint-initdb.d/07-platform_extension.sql:ro
+      - ./sql/kazumi_rules.sql:/docker-entrypoint-initdb.d/08-kazumi_rules.sql:ro
+      - ./sql/animeko_rules.sql:/docker-entrypoint-initdb.d/09-animeko_rules.sql:ro
     command:
       - --default-authentication-plugin=mysql_native_password
       - --character-set-server=utf8mb4
@@ -31,10 +83,11 @@ services:
     networks:
       - abc-network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot123"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root123}"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 15
+      start_period: 30s
 
   # ── Redis 5.0 ──────────────────────────────────────────────
   redis:
@@ -45,23 +98,23 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes --requirepass redis123
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis123}
     networks:
       - abc-network
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "redis123", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis123}", "ping"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
 
-  # ── MongoDB 5.0.5 ──────────────────────────────────────────
+  # ── MongoDB 5.0.5（弹幕库） ────────────────────────────────
   mongodb:
     image: mongo:5.0.5
     container_name: abc-mongodb
     restart: unless-stopped
     environment:
       MONGO_INITDB_ROOT_USERNAME: root
-      MONGO_INITDB_ROOT_PASSWORD: mongo123
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-mongo123}
       MONGO_INITDB_DATABASE: abc_danmaku
     ports:
       - "27017:27017"
@@ -74,9 +127,10 @@ services:
       test: echo 'db.runCommand("ping").ok' | mongo localhost:27017/test --quiet
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 20s
 
-  # ── ElasticSearch 7.17.27 ──────────────────────────────────
+  # ── ElasticSearch 7.17.27（检索） ──────────────────────────
   elasticsearch:
     image: elasticsearch:7.17.27
     container_name: abc-elasticsearch
@@ -104,7 +158,8 @@ services:
       test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -vq '\"status\":\"red\"'"]
       interval: 20s
       timeout: 10s
-      retries: 10
+      retries: 15
+      start_period: 40s
 
   # ── RocketMQ NameServer ────────────────────────────────────
   rocketmq-namesrv:
@@ -128,6 +183,9 @@ services:
       start_period: 10s
 
   # ── RocketMQ Broker ────────────────────────────────────────
+  # 现状说明：RocketMQ 已接入弹幕写路径（Redis 缓冲 → MQ → 消费端批量落库）。
+  # 开关是 abc-danmaku-service 的 DANMAKU_MQ_ENABLED（见下方服务定义）；关闭或 MQ 不可用时
+  # FlushTask 自动降级为本地批量落库（不丢弹幕），因此它同时是压测对照实验的"异步/同步"开关。
   rocketmq-broker:
     image: apache/rocketmq:5.1.4
     container_name: abc-rmq-broker
@@ -155,7 +213,7 @@ services:
       retries: 8
       start_period: 10s
 
-  # ── Nacos 2.x (Standalone) ─────────────────────────────────
+  # ── Nacos 2.x（注册中心 + 配置中心，单机模式） ─────────────
   nacos:
     image: nacos/nacos-server:v2.3.1
     container_name: abc-nacos
@@ -163,7 +221,7 @@ services:
     environment:
       - MODE=standalone
       - PREFER_HOST_MODE=hostname
-      # 开启鉴权：控制台需登录（nacos/nacos）；各微服务在 bootstrap.yml 的
+      # 开启鉴权：控制台需登录（nacos/nacos）；各微服务 bootstrap.yml 的
       # spring.cloud.nacos.config 下必须带 username/password，否则 403 user not found
       - NACOS_AUTH_ENABLE=true
       - NACOS_AUTH_TOKEN=SecretKey012345678901234567890123456789012345678901234567890123456789
@@ -180,12 +238,33 @@ services:
       test: ["CMD-SHELL", "curl -s -u nacos:nacos http://localhost:8848/nacos/v1/console/health/readiness"]
       interval: 15s
       timeout: 10s
-      retries: 8
+      retries: 15
+      start_period: 30s
+
+  # ── Nacos 共享配置发布（一次性作业） ───────────────────────
+  # 用 nacos 官方镜像自带的 curl 执行脚本（不额外拉 curlimages/curl 镜像）。
+  # 成功后容器退出码 0，业务服务通过 depends_on: service_completed_successfully 等它跑完。
+  nacos-config-init:
+    image: nacos/nacos-server:v2.3.1
+    container_name: abc-nacos-config-init
+    restart: "no"
+    entrypoint: ["sh", "/init-nacos.sh"]
+    environment:
+      NACOS_ADDR: http://nacos:8848
+      NACOS_USER: nacos
+      NACOS_PASSWORD: nacos
+      CONF_DIR: /config
+    volumes:
+      - ./docker/init-nacos.sh:/init-nacos.sh:ro
+      - ./docker/nacos:/config:ro
+    depends_on:
+      nacos:
+        condition: service_healthy
+    networks:
+      - abc-network
 
   # ── Bangumi 元数据反代网关（可选，推荐）────────────────────
   # 把易变的境外 Bangumi 镜像收敛为项目内稳定地址 http://abc-bgm-gateway
-  # 启用方式：docker-compose up -d abc-bgm-gateway
-  #          并在 anime-service 配置 abc.bangumi.mirrors 追加 http://abc-bgm-gateway
   abc-bgm-gateway:
     image: nginx:1.27-alpine
     container_name: abc-bgm-gateway
@@ -194,6 +273,332 @@ services:
       - "8090:80"
     volumes:
       - ./docker/nginx/bangumi.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - abc-network
+
+  # ══════════════════════════════════════════════════════════
+  #  二、业务微服务（10 个）
+  #  公共部分：多阶段构建、JAVA_OPTS 限内存、非 root 运行、TCP 探活
+  # ══════════════════════════════════════════════════════════
+
+  # ── 网关（唯一对外入口，路由 + 全局 JWT 过滤） ─────────────
+  abc-gateway:
+    build:
+      context: .
+      dockerfile: abc-gateway/Dockerfile
+    image: abc/anime-gateway:1.0.0
+    container_name: abc-gateway
+    restart: unless-stopped
+    environment:
+      <<: *env-common
+    depends_on:
+      nacos:
+        condition: service_healthy
+      nacos-config-init:
+        condition: service_completed_successfully
+    ports:
+      - "8080:8080"
+    networks:
+      - abc-network
+    healthcheck:
+      # 端口可连 = Spring 容器已起来；没有 actuator 依赖，用 TCP 探活是成本最低的方案
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/8080' || exit 1"]
+      <<: *hc
+
+  # ── 认证服务（注册/登录/JWT 签发） ────────────────────────
+  abc-auth-service:
+    build:
+      context: .
+      dockerfile: abc-auth-service/Dockerfile
+    image: abc/anime-auth-service:1.0.0
+    container_name: abc-auth-service
+    restart: unless-stopped
+    environment:
+      <<: [*env-common, *env-mysql, *env-redis]
+    depends_on:
+      nacos:
+        condition: service_healthy
+      nacos-config-init:
+        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    networks:
+      - abc-network
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/8081' || exit 1"]
+      <<: *hc
+
+  # ── 用户服务（资料/设置/观看历史/收藏） ───────────────────
+  abc-user-service:
+    build:
+      context: .
+      dockerfile: abc-user-service/Dockerfile
+    image: abc/anime-user-service:1.0.0
+    container_name: abc-user-service
+    restart: unless-stopped
+    environment:
+      <<: [*env-common, *env-mysql, *env-redis]
+    depends_on:
+      nacos:
+        condition: service_healthy
+      nacos-config-init:
+        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8082:8082"
+    networks:
+      - abc-network
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/8082' || exit 1"]
+      <<: *hc
+
+  # ── 番剧服务（Bangumi 元数据代理 + 聚合搜索 + 缓存） ──────
+  abc-anime-service:
+    build:
+      context: .
+      dockerfile: abc-anime-service/Dockerfile
+    image: abc/anime-anime-service:1.0.0
+    container_name: abc-anime-service
+    restart: unless-stopped
+    environment:
+      <<: [*env-common, *env-mysql, *env-redis]
+      # 容器里 127.0.0.1 不通宿主机的 Clash：置空即关闭"魔法代理"，
+      # 走 abc-bgm-gateway 反代 + 公网镜像；需要代理时改成 host.docker.internal 并加 extra_hosts
+      ABC_BANGUMI_PROXY_HOST: ""
+      # 第一优先级用容器内反代，其余保留公网镜像（Java 侧已实现 failover + 粘住上一次成功的镜像）
+      ABC_BANGUMI_MIRRORS: "http://abc-bgm-gateway,https://api.bangumi.vip,https://bgmapi.anibt.net,https://api.bgmapi.com"
+    depends_on:
+      nacos:
+        condition: service_healthy
+      nacos-config-init:
+        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8083:8083"
+    networks:
+      - abc-network
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/8083' || exit 1"]
+      <<: *hc
+
+  # ── 视频服务（上传 + 静态资源 /uploads） ──────────────────
+  abc-video-service:
+    build:
+      context: .
+      dockerfile: abc-video-service/Dockerfile
+    image: abc/anime-video-service:1.0.0
+    container_name: abc-video-service
+    restart: unless-stopped
+    environment:
+      <<: [*env-common, *env-mysql, *env-redis]
+      # 上传目录落在 named volume 上，容器重建不丢视频（对应 application.yml 的 video.upload.dir）
+      VIDEO_UPLOAD_DIR: /app/uploads/videos
+    depends_on:
+      nacos:
+        condition: service_healthy
+      nacos-config-init:
+        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8084:8084"
+    volumes:
+      - uploads_data:/app/uploads
+    networks:
+      - abc-network
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/8084' || exit 1"]
+      <<: *hc
+
+  # ── 弹幕服务（WebSocket 实时广播 + MongoDB 持久化 + 弹弹play 拉取） ──
+  abc-danmaku-service:
+    build:
+      context: .
+      dockerfile: abc-danmaku-service/Dockerfile
+    image: abc/anime-danmaku-service:1.0.0
+    container_name: abc-danmaku-service
+    restart: unless-stopped
+    environment:
+      <<: [*env-common, *env-redis]
+      SPRING_DATA_MONGODB_URI: "mongodb://root:${MONGO_ROOT_PASSWORD:-mongo123}@mongodb:27017/abc_danmaku?authSource=admin"
+      ROCKETMQ_NAME_SERVER: rocketmq-namesrv:9876
+      # 打开 RocketMQ 异步落库链路（本地默认 false 走「Redis 缓冲 + 批量本地落库」）；
+      # 关掉即回到本地降级路径，可作为压测对照实验的开关
+      DANMAKU_MQ_ENABLED: "true"
+      # 弹弹play 开放平台凭据（可选）：留空则"拉取上游弹幕"功能自动跳过，USER 弹幕不受影响
+      DANDANPLAY_APP_ID: ${DANDANPLAY_APP_ID:-}
+      DANDANPLAY_APP_SECRET: ${DANDANPLAY_APP_SECRET:-}
+    depends_on:
+      nacos:
+        condition: service_healthy
+      nacos-config-init:
+        condition: service_completed_successfully
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rocketmq-namesrv:
+        condition: service_healthy
+      rocketmq-broker:
+        condition: service_healthy
+    ports:
+      - "8085:8085"
+    networks:
+      - abc-network
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/8085' || exit 1"]
+      <<: *hc
+
+  # ── 评论/评分服务 ─────────────────────────────────────────
+  abc-comment-service:
+    build:
+      context: .
+      dockerfile: abc-comment-service/Dockerfile
+    image: abc/anime-comment-service:1.0.0
+    container_name: abc-comment-service
+    restart: unless-stopped
+    environment:
+      <<: [*env-common, *env-mysql, *env-redis]
+      ROCKETMQ_NAME_SERVER: rocketmq-namesrv:9876
+    depends_on:
+      nacos:
+        condition: service_healthy
+      nacos-config-init:
+        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rocketmq-namesrv:
+        condition: service_healthy
+    ports:
+      - "8086:8086"
+    networks:
+      - abc-network
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/8086' || exit 1"]
+      <<: *hc
+
+  # ── 检索服务（ElasticSearch） ─────────────────────────────
+  # 已知限制：ElasticSearchConfig.java:25 把 ES 地址写死成 new HttpHost("127.0.0.1", 9200)，
+  # 容器内 127.0.0.1 不是 ES，因此该服务的 ES 检索能力在容器里不可用（服务本身能启动，
+  # 网关默认的 /api/search/** 走 anime-service 的 Redis+MySQL 聚合搜索，不受影响）。
+  # 彻底修复需要改那行代码为配置项（属后端 scope）；临时方案见 README-DOCKER.md「已知限制」。
+  abc-search-service:
+    build:
+      context: .
+      dockerfile: abc-search-service/Dockerfile
+    image: abc/anime-search-service:1.0.0
+    container_name: abc-search-service
+    restart: unless-stopped
+    environment:
+      <<: [*env-common, *env-mysql, *env-redis]
+    depends_on:
+      nacos:
+        condition: service_healthy
+      nacos-config-init:
+        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    ports:
+      - "8087:8087"
+    networks:
+      - abc-network
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/8087' || exit 1"]
+      <<: *hc
+
+  # ── 规则源引擎（自定义规则解析 + 流代理 /api/source/**） ──
+  # 已知限制：BrowserResolver 用 Playwright 驱动"本机已装的 Chrome"（channel=chrome），
+  # JRE 镜像里没有浏览器，因此"浏览器直链解析"（browser_resolve=1 的规则）在容器内不可用；
+  # 普通 maccms/xpath/api 规则不依赖浏览器，正常工作。
+  abc-source-service:
+    build:
+      context: .
+      dockerfile: abc-source-service/Dockerfile
+    image: abc/anime-source-service:1.0.0
+    container_name: abc-source-service
+    restart: unless-stopped
+    environment:
+      <<: [*env-common, *env-mysql, *env-redis]
+    depends_on:
+      nacos:
+        condition: service_healthy
+      nacos-config-init:
+        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8088:8088"
+    networks:
+      - abc-network
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/8088' || exit 1"]
+      <<: *hc
+
+  # ── AI 桌宠服务（LangChain4j + DeepSeek SSE + RAG） ───────
+  abc-ai-service:
+    build:
+      context: .
+      dockerfile: abc-ai-service/Dockerfile
+    image: abc/anime-ai-service:1.0.0
+    container_name: abc-ai-service
+    restart: unless-stopped
+    environment:
+      <<: [*env-common, *env-mysql, *env-redis]
+      # 留空则服务仍可启动（前端提示未配置），填了才走 DeepSeek
+      AI_API_KEY: ${AI_API_KEY:-}
+    depends_on:
+      nacos:
+        condition: service_healthy
+      nacos-config-init:
+        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8089:8089"
+    networks:
+      - abc-network
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/8089' || exit 1"]
+      <<: *hc
+
+  # ══════════════════════════════════════════════════════════
+  #  三、前端（Vite 产物 + nginx 反代）
+  # ══════════════════════════════════════════════════════════
+  abc-frontend:
+    build:
+      context: .
+      dockerfile: abc-frontend/Dockerfile
+    image: abc/anime-frontend:1.0.0
+    container_name: abc-frontend
+    restart: unless-stopped
+    depends_on:
+      abc-gateway:
+        condition: service_healthy
+    ports:
+      # 宿主 3000，与开发期 Vite devServer 端口一致，切换部署方式不用改习惯
+      - "3000:80"
     networks:
       - abc-network
 
@@ -207,8 +612,9 @@ volumes:
   rmq_broker_data:
   rmq_store_data:
   nacos_data:
+  # 视频上传目录（容器重建不丢视频）
+  uploads_data:
 
-# ═══════════════════════════════════════════════════════════════
 networks:
   abc-network:
     driver: bridge

@@ -25,6 +25,9 @@ abc:
     free-fallback-base-url: https://text.pollinations.ai/openai
     free-fallback-model: openai
 
+  # 服务间内部令牌：调 user-service /api/user/ai-key/raw 时携带，user-service 侧同值校验
+  internal-token: ${ABC_INTERNAL_TOKEN:abc-internal-token-2024}
+
 server:
   port: 8089
   servlet:

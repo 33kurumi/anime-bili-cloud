@@ -25,3 +25,10 @@ knife4j:
   enable: true
   setting:
     language: zh_cn
+
+# 认证相关开关
+abc:
+  auth:
+    # 是否强制校验图形验证码：true 时登录/注册必须提交 captchaKey+captchaCode
+    # 当前前端登录页未接入验证码 UI，默认关闭；接入后置 true（或环境变量 ABC_CAPTCHA_REQUIRED=true）
+    captcha-required: ${ABC_CAPTCHA_REQUIRED:false}

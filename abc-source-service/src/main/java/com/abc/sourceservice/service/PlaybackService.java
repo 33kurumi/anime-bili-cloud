@@ -5,6 +5,7 @@ import com.abc.sourceservice.engine.RuleEngine;
 import com.abc.sourceservice.engine.RuleExecutionConfig;
 import com.abc.sourceservice.engine.browser.BrowserResolver;
 import com.abc.sourceservice.entity.SourceRule;
+import com.abc.sourceservice.security.ProxySigner;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -27,6 +28,7 @@ public class PlaybackService {
     private final SourceRuleService ruleService;
     private final RedisTemplate<String, Object> redisTemplate;
     private final BrowserResolver browserResolver;
+    private final ProxySigner proxySigner;
 
     private static final long CACHE_TTL_SECONDS = 3600;
     private static final int MAX_TRY = 8;   // 自动择优最多尝试几个候选
@@ -37,9 +39,8 @@ public class PlaybackService {
 
     public Map<String, Object> play(String animeKey, int episodeNum, String title,
                                     String cleanTitle, Long ruleId) {
-        String cacheKey = "source:play:" + animeKey + ":" + episodeNum + (ruleId == null ? "" : ":" + ruleId);
-        @SuppressWarnings("unchecked")
-        Map<String, Object> cached = (Map<String, Object>) redisTemplate.opsForValue().get(cacheKey);
+        String cacheKey = cacheKey(animeKey, episodeNum, ruleId);
+        Map<String, Object> cached = getCached(cacheKey);
         if (cached != null) return cached;
 
         Map<String, Object> result = new LinkedHashMap<>();
@@ -75,11 +76,41 @@ public class PlaybackService {
         return result;
     }
 
+    // ─── 缓存读写（选源编排 SourceSelectService 复用同一套 key/容错）─────
+
+    /** 播放结果缓存 key：番剧 + 集 + （可选）指定源。 */
+    public String cacheKey(String animeKey, int episodeNum, Long ruleId) {
+        return "source:play:" + animeKey + ":" + episodeNum + (ruleId == null ? "" : ":" + ruleId);
+    }
+
+    /**
+     * 读缓存。Redis 挂了不能影响播放：异常一律当未命中返回 null。
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getCached(String cacheKey) {
+        try {
+            return (Map<String, Object>) redisTemplate.opsForValue().get(cacheKey);
+        } catch (Exception e) {
+            log.warn("读取播放缓存失败（降级为未命中）: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /** 真直链才缓存（page 结果不算，避免把"需要浏览器再解析"的中间态缓存 1 小时）。 */
+    public void putCached(String cacheKey, Map<String, Object> r) {
+        if (r == null || r.get("url") == null || "page".equals(r.get("resolvedBy"))) {
+            return;
+        }
+        try {
+            redisTemplate.opsForValue().set(cacheKey, r, CACHE_TTL_SECONDS, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            log.warn("写入播放缓存失败（不影响本次播放）: {}", e.getMessage());
+        }
+    }
+
     /** 真直链才缓存；返回结果。 */
     private Map<String, Object> finish(String cacheKey, boolean isDirect, Map<String, Object> r) {
-        if (r.get("url") != null && !"page".equals(r.get("resolvedBy"))) {
-            redisTemplate.opsForValue().set(cacheKey, r, CACHE_TTL_SECONDS, TimeUnit.SECONDS);
-        }
+        putCached(cacheKey, r);
         return r;
     }
 
@@ -87,7 +118,7 @@ public class PlaybackService {
      * 把一个候选解析成可播信息。失败时返回带 message 的 map（url 为空）。
      */
     @SuppressWarnings("unchecked")
-    private Map<String, Object> resolveCandidate(SourceAggregator.Candidate c, int episodeNum) {
+    public Map<String, Object> resolveCandidate(SourceAggregator.Candidate c, int episodeNum) {
         Map<String, Object> result = new LinkedHashMap<>();
         SourceRule rule = ruleService.getById(c.ruleId());
         if (rule == null) { result.put("message", "规则不存在"); return result; }
@@ -157,8 +188,8 @@ public class PlaybackService {
         result.put("resolvedBy", resolvedBy);
         if (episodePageUrl != null) result.put("episodePageUrl", episodePageUrl);
         result.put("headers", headers);
-        result.put("proxyUrl", "/api/source/proxy?ruleId=" + rule.getId()
-                + "&u=" + java.net.URLEncoder.encode(playUrl, java.nio.charset.StandardCharsets.UTF_8));
+        // 带签名：前端/播放器直接拿它播，代理端验签防篡改与白嫖
+        result.put("proxyUrl", proxySigner.signedProxyUrl(rule.getId(), playUrl));
         return result;
     }
 }
